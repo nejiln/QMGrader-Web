@@ -15,8 +15,21 @@ const icon=(name)=>({
   plus:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   arrow:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
   download:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>',
-  print:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V4h10v4M6 17H4V9h16v8h-2M7 14h10v6H7z"/><path d="M17 11h1"/></svg>'
+  print:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V4h10v4M6 17H4V9h16v8h-2M7 14h10v6H7z"/><path d="M17 11h1"/></svg>',
+  moon:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"/></svg>',
+  sun:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>'
 })[name]||'';
+
+function setTheme(theme,persist=false){
+  const dark=theme==='dark';document.documentElement.dataset.theme=dark?'dark':'light';
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',dark?'#101612':'#f6f4ef');
+  if(persist)try{localStorage.setItem('qm-cham-theme',dark?'dark':'light');}catch{}
+  const button=root.querySelector('.theme-toggle');
+  if(button){const label=dark?'Chuyển sang giao diện sáng':'Chuyển sang giao diện tối';button.innerHTML=icon(dark?'sun':'moon');button.setAttribute('aria-label',label);button.setAttribute('aria-pressed',String(dark));button.title=label;}
+}
+const systemTheme=matchMedia('(prefers-color-scheme: dark)');let savedTheme;try{savedTheme=localStorage.getItem('qm-cham-theme');}catch{}
+setTheme(savedTheme==='dark'||savedTheme==='light'?savedTheme:systemTheme.matches?'dark':'light');
+systemTheme.addEventListener('change',event=>{try{if(localStorage.getItem('qm-cham-theme'))return;}catch{}setTheme(event.matches?'dark':'light');});
 
 function openDatabase(){return new Promise((resolve,reject)=>{
   const request=indexedDB.open('qm-cham-local',1);
@@ -66,6 +79,9 @@ async function render(){
   const photos=state.view==='submission'?await submissionPhotos(data.submissions.find(item=>item.id===state.submissionId)):{};
   const label=pageLabels[state.view]||'Dữ liệu',storageMessage=navigator.onLine?`${label} lưu trên iPhone`:`${label} vẫn ở trên máy`;
   root.innerHTML=`<header class="topbar"><a class="brand" href="#" data-action="home"><span class="brand-mark">QM</span><span class="brand-copy"><strong>QM Chấm</strong><small>Phiếu QM 2025</small></span></a><span class="storage-status" aria-label="Dữ liệu lưu trên thiết bị"><i class="status-dot ${navigator.onLine?'':'offline'}"></i>${storageMessage}</span></header>${installHint()}<main id="main">${await page(data,photos)}</main>${tabs()}`;
+  const status=root.querySelector('.storage-status'),tools=document.createElement('div'),button=document.createElement('button'),dark=document.documentElement.dataset.theme==='dark',buttonLabel=dark?'Chuyển sang giao diện sáng':'Chuyển sang giao diện tối';
+  tools.className='topbar-tools';button.className='theme-toggle';button.type='button';button.dataset.action='toggle-theme';button.innerHTML=icon(dark?'sun':'moon');button.setAttribute('aria-label',buttonLabel);button.setAttribute('aria-pressed',String(dark));button.title=buttonLabel;
+  status.before(tools);tools.append(status,button);
   attachOffline();
 }
 function tabs(){const activeView=['batch','batch-detail','submission'].includes(state.view)?'batches':state.view;return `<nav class="tabbar" aria-label="Điều hướng chính">${[['batches','scan','Chấm bài'],['exams','exam','Đề thi'],['roster','people','Danh sách']].map(([view,symbol,label])=>`<button class="tab" data-action="navigate" data-view="${view}" aria-current="${activeView===view?'page':'false'}">${icon(symbol)}<span>${label}</span></button>`).join('')}</nav>`;}
@@ -304,6 +320,7 @@ async function handleClick(event){
   const target=event.target.closest('[data-action]');if(!target)return;
   const action=target.dataset.action;
   try{
+    if(action==='toggle-theme'){setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark',true);return;}
     if(action==='home'){event.preventDefault();state.view='batches';state.batchId=null;await render();}
     if(action==='navigate'){state.view=target.dataset.view==='batch'?'batch':target.dataset.view;state.batchId=null;await render();}
     if(action==='new-batch')await newBatchDialog();

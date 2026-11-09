@@ -19,6 +19,7 @@ PWA mobile-first cho mẫu QM 2025 - CV 1239. App không có backend, tài kho�
 - Chấm Phần II theo từng ý hoặc trọn câu; điểm riêng từng câu; so số thập phân chính xác, gồm số âm.
 - Nhập roster CSV/XLSX; trích xuất đáp án từ XLSX/DOCX/PDF có text; xuất CSV UTF-8 mở được bằng Excel.
 - Cache app cho lần mở offline tiếp theo. Dùng PDF QM 2025 bạn đang có để in phiếu.
+- Giao diện tối theo cài đặt thiết bị; nút trên cùng đổi sáng/tối và nhớ lựa chọn.
 
 ## Giới hạn
 

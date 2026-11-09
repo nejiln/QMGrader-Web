@@ -47,8 +47,14 @@ assert.equal(flagged.answers.multipleChoice[q],null);
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('I-1')));
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('đủ 2 trang')));
 
-const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4'];
+const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
-assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3'].sort());
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6'].sort());
+
+for(const [system,saved,expected] of [['dark',null,'dark'],['light',null,'light'],['dark','light','light']]){
+  const document={documentElement:{dataset:{}},querySelector:()=>({setAttribute(name,value){this[name]=value;}})};
+  vm.runInNewContext(await readFile(new URL('../theme-init.js',import.meta.url),'utf8'),{document,matchMedia:()=>({matches:system==='dark'}),localStorage:{getItem:()=>saved}});
+  assert.equal(document.documentElement.dataset.theme,expected);
+}
 console.log('QMGrader self-check passed: scoring, CSV, roster, 78 OMR marks, skew, uncertainty, missing page.');
