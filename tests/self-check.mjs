@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
 import { FORM, canonicalDecimal, emptyAnswers, gradeSubmission, parseCSV, rosterRows, scanForm, scoreCSV } from '../core.mjs';
 
 assert.equal(canonicalDecimal('-001,2500'), '-1.25');
@@ -44,4 +46,9 @@ const flagged=scanForm(uncertain,width,height,1);
 assert.equal(flagged.answers.multipleChoice[q],null);
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('I-1')));
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('đủ 2 trang')));
+
+const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3'];
+vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
+let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2'].sort());
 console.log('QMGrader self-check passed: scoring, CSV, roster, 78 OMR marks, skew, uncertainty, missing page.');
