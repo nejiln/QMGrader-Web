@@ -141,7 +141,7 @@ function findMarker(pixels,width,height,center,minSize=10,scale=FORM.scale) {
   }
   return best;
 }
-function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=FORM) {
+function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=FORM,fillThreshold=0.24) {
   const [cx,cy]=markerMap(point,observed,scale,profile.markers),r=1.1*scale,ix=Math.floor(cx),iy=Math.floor(cy);
   let dark=0,visible=0,count=0,centerTotal=0;
   for(let y=Math.floor(cy-r);y<=Math.ceil(cy+r);y++)for(let x=Math.floor(cx-r);x<=Math.ceil(cx+r);x++){
@@ -149,7 +149,7 @@ function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=
     const gray=pixels[y*width+x];count++;centerTotal+=gray;if(gray<150)dark++;if(gray<235)visible++;
   }
   if(!count)return 'uncertain';
-  if(dark/count>=0.16)return 'filled';
+  if(dark/count>=fillThreshold)return 'filled';
   if(profile===FORM)return visible/count>=0.08?'uncertain':'blank';
   let backgroundTotal=0,backgroundCount=0;
   for(let y=Math.floor(cy-r*2.8);y<=Math.ceil(cy+r*2.8);y++)for(let x=Math.floor(cx-r*2.8);x<=Math.ceil(cx+r*2.8);x++){
@@ -160,8 +160,8 @@ function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=
   return 'blank';
 }
 
-function selectOne(pixels,width,height,observed,points,label,warnings,blank=true,scale=FORM.scale,profile=FORM) {
-  const marks=points.map(p=>bubbleMark(pixels,width,height,observed,p,scale,profile));
+function selectOne(pixels,width,height,observed,points,label,warnings,blank=true,scale=FORM.scale,profile=FORM,fillThreshold=0.24) {
+  const marks=points.map(p=>bubbleMark(pixels,width,height,observed,p,scale,profile,fillThreshold));
   const selected=marks.flatMap((m,i)=>m==='filled'?[i]:[]);
   if(selected.length===1&&!marks.includes('uncertain'))return selected[0];
   if(selected.length>1||marks.includes('uncertain'))warnings.push(`${label}: tô mờ hoặc nhiều ô`);
@@ -178,7 +178,7 @@ function scanProfile(pixels,width,height,scale,profile) {
     warnings.push('Không nhận diện được phiếu hoặc mốc căn chỉnh');return {seatNumber,examCode,answers};
   }
   const digits=(columns,label)=>columns.map((x,col)=>{
-    const selected=selectOne(pixels,width,height,observed,profile.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale,profile);
+    const selected=selectOne(pixels,width,height,observed,profile.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale,profile,0.16);
     return selected==null?'?':String(selected);
   }).join('');
   seatNumber=digits(profile.seatColumns,'SBD');examCode=digits(profile.codeColumns,'Mã đề');
