@@ -98,6 +98,7 @@ export async function renderPdfPages(file) {
 
 export function extractAnswerKey(text) {
   const lines = String(text).split(/\r?\n/), sections = {1: [], 2: [], 3: []};
+  const code = plain(text).match(/\bma\s*de(?:\s*thi)?(?:\s*so)?\s*[\s:#=|–—-]*(\d{1,4})\b/i)?.[1].padStart(4,'0') || '';
   let section = 0;
   for (const line of lines) {
     const normalized = normalizeHeader(line).replace(/\s/g, '');
@@ -120,7 +121,7 @@ export function extractAnswerKey(text) {
     const n=Number(match[1]); if(n>=1&&n<=6)numbers.set(n,match[2]);
   }
   const numeric = numbers.size===6 ? Array.from({length:6},(_,i)=>numbers.get(i+1)).join('; ') : '';
-  return {multipleChoice,trueFalse,numeric};
+  return {code,multipleChoice,trueFalse,numeric};
 }
 
 export async function importRosterFile(file, defaultClass='') {
