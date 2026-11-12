@@ -2,12 +2,22 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { FORM, canonicalDecimal, emptyAnswers, gradeSubmission, hasFormMarkers, parseCSV, rosterRows, scanForm, scanSignature, scoreCSV } from '../core.mjs';
-import { extractAnswerKey } from '../imports.mjs';
+import { extractAnswerKey, extractAnswerKeyVariants } from '../imports.mjs';
 
 assert.equal(extractAnswerKey('MÃ ĐỀ: 1234').code,'1234');
 assert.equal(extractAnswerKey('Mã đề thi số | 0042').code,'0042');
 assert.equal(extractAnswerKey('Mã đề | 42').code,'0042');
 assert.equal(extractAnswerKey('Đáp án câu 1234').code,'');
+const testCodes=['9001','9002','9003','9004','9005','9006'];
+const answerTable=[['Câu hỏi','Mã đề thi'],[null,...testCodes],...Array.from({length:12},(_,i)=>[i+1,...testCodes.map((_,j)=>'ABCD'[(i+j)%4])]),...[0,1,2].map((n)=>[13+n,...testCodes.map((_,i)=>n===0?'ĐĐSĐ':i%2?'SĐĐĐ':'ĐSĐS')]),[16,...testCodes.map((_,i)=>String(i-2))],[17,...testCodes.map((_,i)=>i===0?'-1,25':`${i},5`)],[18,...testCodes.map((_,i)=>String(i+1))],[19,...testCodes.map((_,i)=>`${i},25`)]];
+const answerVariants=extractAnswerKeyVariants('',[answerTable]);
+assert.deepEqual(answerVariants.map(({code})=>code),testCodes);
+assert.deepEqual(answerVariants[0].questionCounts,{multipleChoice:12,trueFalse:3,numeric:4});
+assert.equal(answerVariants[0].key.multipleChoice[11],'D');
+assert.deepEqual(answerVariants[0].key.trueFalse.slice(0,4),[true,true,false,true]);
+assert.equal(answerVariants[0].key.numeric[1],'-1,25');
+assert.equal(answerVariants[2].key.multipleChoice[0],'C');
+assert.equal(answerVariants[2].key.numeric[0],'0');
 
 assert.equal(canonicalDecimal('-001,2500'), '-1.25');
 assert.equal(canonicalDecimal('-0.000'), '0');
@@ -17,6 +27,11 @@ const key={multipleChoice:Array(40).fill('A'),trueFalse:Array(32).fill(true),num
 const answers=emptyAnswers();answers.multipleChoice.fill('A');answers.trueFalse.fill(true);answers.numeric.fill('-1.250');
 const policy={multipleChoiceTotal:40,trueFalseTotal:32,numericTotal:6,sectionTwoRule:'perStatement',multipleChoiceQuestionPoints:[],trueFalseQuestionPoints:[],numericQuestionPoints:[]};
 assert.equal(gradeSubmission(key,answers,policy).totalEarned,78);
+const partialAnswers=emptyAnswers();partialAnswers.multipleChoice=answerVariants[0].key.multipleChoice;partialAnswers.trueFalse=answerVariants[0].key.trueFalse;partialAnswers.numeric=answerVariants[0].key.numeric;
+assert.equal(gradeSubmission(answerVariants[0].key,partialAnswers,{...policy,multipleChoiceTotal:12,trueFalseTotal:12,numericTotal:4}).totalEarned,28);
+const weighted=gradeSubmission(answerVariants[0].key,partialAnswers,{...policy,questionCounts:answerVariants[0].questionCounts,multipleChoiceQuestionPoints:Array(12).fill(1),trueFalseQuestionPoints:Array(3).fill(2),numericQuestionPoints:Array(4).fill(3)});
+assert.equal(weighted.totalEarned,30);
+assert.equal(weighted.totalPossible,30);
 answers.multipleChoice[0]='B';answers.trueFalse[0]=false;answers.numeric[0]='-1.24';
 assert.equal(gradeSubmission(key,answers,policy).totalEarned,75);
 policy.sectionTwoRule='allOrNothing';
@@ -62,10 +77,10 @@ assert.equal(flagged.answers.multipleChoice[q],null);
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('I-1')));
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('đủ 2 trang')));
 
-const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9'];
+const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
-assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8'].sort());
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9'].sort());
 
 for(const [system,saved,expected] of [['dark',null,'dark'],['light',null,'light'],['dark','light','light']]){
   const document={documentElement:{dataset:{}},querySelector:()=>({setAttribute(name,value){this[name]=value;}})};

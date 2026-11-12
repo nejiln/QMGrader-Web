@@ -99,6 +99,7 @@ export async function renderPdfPages(file) {
 export function extractAnswerKey(text) {
   const lines = String(text).split(/\r?\n/), sections = {1: [], 2: [], 3: []};
   const code = plain(text).match(/\bma\s*de(?:\s*thi)?(?:\s*so)?\s*[\s:#=|–—-]*(\d{1,4})\b/i)?.[1].padStart(4,'0') || '';
+  const multipleChoice=Array(40).fill(''),trueFalse=Array(32).fill(null),numeric=Array(6).fill('');
   let section = 0;
   for (const line of lines) {
     const normalized = normalizeHeader(line).replace(/\s/g, '');
@@ -112,16 +113,55 @@ export function extractAnswerKey(text) {
   for (const line of sections[1]) for (const match of plain(line).matchAll(/(?:cau\s*)?(\d{1,2})\s*[).:\-\s]+([ABCD])\b/gi)) {
     const n=Number(match[1]); if(n>=1&&n<=40)choiceByNumber.set(n,match[2].toUpperCase());
   }
-  const multipleChoice = choiceByNumber.size===40 ? Array.from({length:40},(_,i)=>choiceByNumber.get(i+1)).join('') : '';
+  for(const [question,value] of choiceByNumber)multipleChoice[question-1]=value;
   const tfText = plain(sections[2].join(' '));
-  const tfValues = Array.from(tfText.matchAll(/\b(dung|sai|true|false)\b/gi), match => /^dung$|^true$/i.test(match[1])?'Đ':'S');
-  const trueFalse = tfValues.length===32?tfValues.join(''):'';
+  const tfValues = Array.from(tfText.matchAll(/\b(dung|sai|true|false)\b/gi), match => /^dung$|^true$/i.test(match[1]));
+  tfValues.slice(0,32).forEach((value,index)=>trueFalse[index]=value);
   const numbers = new Map();
   for (const line of sections[3]) for (const match of plain(line).matchAll(/(?:cau\s*)?(\d{1,2})\s*[).:\-\s]+(-?\d+(?:[.,]\d+)?)(?=\s|$)/gi)) {
     const n=Number(match[1]); if(n>=1&&n<=6)numbers.set(n,match[2]);
   }
-  const numeric = numbers.size===6 ? Array.from({length:6},(_,i)=>numbers.get(i+1)).join('; ') : '';
+  for(const [question,value] of numbers)numeric[question-1]=value;
   return {code,multipleChoice,trueFalse,numeric};
+}
+
+export function extractAnswerKeyVariants(text,tables=[]) {
+  const variants=[];
+  for(const table of tables){
+    const header=table.findIndex(row=>row.some(cell=>normalizeHeader(cell)==='cauhoi')&&row.some(cell=>normalizeHeader(cell).includes('made')));
+    if(header<0)continue;
+    const codeRow=table[header+1]||[],columns=codeRow.map((value,index)=>({index,code:String(value??'').trim()})).filter(({index,code})=>index>0&&/^\d{1,4}$/.test(code));
+    if(!columns.length)continue;
+    if(columns.length>100)throw new Error('Tệp có hơn 100 mã đề. Chia tệp trước khi nhập.');
+    const rows=table.slice(header+2).map(row=>{
+      const question=Number(String(row[0]??'').trim()),values=columns.map(({index})=>String(row[index]??'').trim().toUpperCase());
+      if(!Number.isInteger(question)||question<1)return null;
+      if(values.some(value=>/^[ABCD]$/.test(value)))return {type:'multipleChoice',question,values};
+      if(values.some(value=>/^[ĐDS]{4}$/.test(value)))return {type:'trueFalse',question,values};
+      if(values.some(value=>/^-?\d+(?:[.,]\d+)?$/.test(value)))return {type:'numeric',question,values};
+      return null;
+    });
+    const questionCounts={multipleChoice:Math.max(0,...rows.filter(row=>row?.type==='multipleChoice').map(row=>row.question)),trueFalse:rows.filter(row=>row?.type==='trueFalse').length,numeric:rows.filter(row=>row?.type==='numeric').length};
+    for(let column=0;column<columns.length;column++){
+      const {index,code}=columns[column];
+      const normalizedCode=code.padStart(4,'0');
+      if(variants.some(variant=>variant.code===normalizedCode))throw new Error(`Mã đề ${normalizedCode} bị lặp trong tệp.`);
+      const key={multipleChoice:Array(40).fill(''),trueFalse:Array(32).fill(null),numeric:Array(6).fill('')};
+      let trueFalseQuestion=0,numericQuestion=0;
+      for(const row of rows){
+        if(!row)continue;
+        const value=row.values[column];
+        if(row.type==='multipleChoice'&&/^[ABCD]$/.test(value)&&row.question<=40)key.multipleChoice[row.question-1]=value;
+        else if(row.type==='trueFalse'){if(/^[ĐDS]{4}$/.test(value)&&trueFalseQuestion<8)for(let i=0;i<4;i++)key.trueFalse[trueFalseQuestion*4+i]=value[i]==='S'?false:true;trueFalseQuestion++;}
+        else if(row.type==='numeric'){if(/^-?\d+(?:[.,]\d+)?$/.test(value)&&numericQuestion<6)key.numeric[numericQuestion]=value;numericQuestion++;}
+      }
+      variants.push({code:normalizedCode,key,questionCounts});
+    }
+  }
+  if(variants.length)return variants;
+  const key=extractAnswerKey(text);
+  const answerKey={multipleChoice:key.multipleChoice,trueFalse:key.trueFalse,numeric:key.numeric},counts={multipleChoice:answerKey.multipleChoice.findLastIndex(Boolean)+1,trueFalse:Math.ceil((answerKey.trueFalse.findLastIndex(value=>value!==null)+1)/4),numeric:answerKey.numeric.findLastIndex(Boolean)+1};
+  return key.code?[{code:key.code,key:answerKey,questionCounts:counts}]:[];
 }
 
 export async function importRosterFile(file, defaultClass='') {

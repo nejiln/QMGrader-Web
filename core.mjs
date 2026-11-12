@@ -28,28 +28,29 @@ export function canonicalDecimal(value) {
   return `${text.startsWith('-') && !zero ? '-' : ''}${whole}${fraction ? `.${fraction}` : ''}`;
 }
 
-const questionPoints = (weights, total, index, count) => Array.isArray(weights) && weights.length === count ? Number(weights[index]) || 0 : (Number(total) || 0) / count;
+const questionPoints = (weights, total, index, count, active=count) => Array.isArray(weights) && (weights.length === count || weights.length === active) ? Number(weights[index]) || 0 : (Number(total) || 0) / Math.max(active,1);
 
 export function gradeSubmission(key, answers, policy) {
+  const mcCount=policy.questionCounts?.multipleChoice??((key.multipleChoice?.findLastIndex(Boolean)??-1)+1),tfQuestions=Array.from({length:8},(_,q)=>key.trueFalse?.slice(q*4,q*4+4).some(value=>value!==null)),tfCount=policy.questionCounts?.trueFalse??(tfQuestions.findLastIndex(Boolean)+1),numericCount=policy.questionCounts?.numeric??((key.numeric?.findLastIndex(value=>canonicalDecimal(value)!==null)??-1)+1);
   const score = {
     multipleChoiceEarned: 0, multipleChoicePossible: 0,
     trueFalseEarned: 0, trueFalsePossible: 0,
     numericEarned: 0, numericPossible: 0
   };
-  score.multipleChoicePossible = Array.isArray(policy.multipleChoiceQuestionPoints) && policy.multipleChoiceQuestionPoints.length === 40 ? policy.multipleChoiceQuestionPoints.reduce((a,b) => a + Number(b || 0), 0) : Number(policy.multipleChoiceTotal) || 0;
-  score.trueFalsePossible = Array.isArray(policy.trueFalseQuestionPoints) && policy.trueFalseQuestionPoints.length === 8 ? policy.trueFalseQuestionPoints.reduce((a,b) => a + Number(b || 0), 0) : Number(policy.trueFalseTotal) || 0;
-  score.numericPossible = Array.isArray(policy.numericQuestionPoints) && policy.numericQuestionPoints.length === 6 ? policy.numericQuestionPoints.reduce((a,b) => a + Number(b || 0), 0) : Number(policy.numericTotal) || 0;
-  for (let i = 0; i < 40; i++) if (key.multipleChoice?.[i] && key.multipleChoice[i] === answers.multipleChoice?.[i]) score.multipleChoiceEarned += questionPoints(policy.multipleChoiceQuestionPoints, policy.multipleChoiceTotal, i, 40);
+  score.multipleChoicePossible = mcCount ? Array.isArray(policy.multipleChoiceQuestionPoints) && [40,mcCount].includes(policy.multipleChoiceQuestionPoints.length) ? policy.multipleChoiceQuestionPoints.slice(0,mcCount).reduce((sum,value)=>sum+Number(value||0),0) : Number(policy.multipleChoiceTotal)||0 : 0;
+  score.trueFalsePossible = tfCount ? Array.isArray(policy.trueFalseQuestionPoints) && [8,tfCount].includes(policy.trueFalseQuestionPoints.length) ? policy.trueFalseQuestionPoints.slice(0,tfCount).reduce((sum,value)=>sum+Number(value||0),0) : Number(policy.trueFalseTotal)||0 : 0;
+  score.numericPossible = numericCount ? Array.isArray(policy.numericQuestionPoints) && [6,numericCount].includes(policy.numericQuestionPoints.length) ? policy.numericQuestionPoints.slice(0,numericCount).reduce((sum,value)=>sum+Number(value||0),0) : Number(policy.numericTotal)||0 : 0;
+  for (let i = 0; i < 40; i++) if (key.multipleChoice?.[i] && key.multipleChoice[i] === answers.multipleChoice?.[i]) score.multipleChoiceEarned += questionPoints(policy.multipleChoiceQuestionPoints, policy.multipleChoiceTotal, i, 40, mcCount);
   for (let q = 0; q < 8; q++) {
     const matches = Array.from({length:4}, (_, j) => key.trueFalse?.[q * 4 + j] != null && answers.trueFalse?.[q * 4 + j] != null && key.trueFalse[q * 4 + j] === answers.trueFalse[q * 4 + j]);
-    const points = questionPoints(policy.trueFalseQuestionPoints, policy.trueFalseTotal, q, 8);
+    const points = questionPoints(policy.trueFalseQuestionPoints, policy.trueFalseTotal, q, 8, tfCount);
     if (policy.sectionTwoRule === 'allOrNothing') {
       if (matches.every(Boolean)) score.trueFalseEarned += points;
     } else score.trueFalseEarned += matches.filter(Boolean).length * points / 4;
   }
   for (let i = 0; i < 6; i++) {
     const expected = canonicalDecimal(key.numeric?.[i]);
-    if (expected !== null && expected === canonicalDecimal(answers.numeric?.[i])) score.numericEarned += questionPoints(policy.numericQuestionPoints, policy.numericTotal, i, 6);
+    if (expected !== null && expected === canonicalDecimal(answers.numeric?.[i])) score.numericEarned += questionPoints(policy.numericQuestionPoints, policy.numericTotal, i, 6, numericCount);
   }
   score.totalEarned = score.multipleChoiceEarned + score.trueFalseEarned + score.numericEarned;
   score.totalPossible = score.multipleChoicePossible + score.trueFalsePossible + score.numericPossible;
