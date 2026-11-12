@@ -141,15 +141,15 @@ function findMarker(pixels,width,height,center,minSize=10,scale=FORM.scale) {
   }
   return best;
 }
-function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=FORM,fillThreshold=0.24) {
+function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=FORM,inkThreshold=150,fillFraction=0.24) {
   const [cx,cy]=markerMap(point,observed,scale,profile.markers),r=1.1*scale,ix=Math.floor(cx),iy=Math.floor(cy);
   let dark=0,visible=0,count=0,centerTotal=0;
   for(let y=Math.floor(cy-r);y<=Math.ceil(cy+r);y++)for(let x=Math.floor(cx-r);x<=Math.ceil(cx+r);x++){
     if((x-ix)**2+(y-iy)**2>r*r||x<0||y<0||x>=width||y>=height)continue;
-    const gray=pixels[y*width+x];count++;centerTotal+=gray;if(gray<150)dark++;if(gray<235)visible++;
+    const gray=pixels[y*width+x];count++;centerTotal+=gray;if(gray<inkThreshold)dark++;if(gray<235)visible++;
   }
   if(!count)return 'uncertain';
-  if(dark/count>=fillThreshold)return 'filled';
+  if(dark/count>=fillFraction)return 'filled';
   if(profile===FORM)return visible/count>=0.08?'uncertain':'blank';
   let backgroundTotal=0,backgroundCount=0;
   for(let y=Math.floor(cy-r*2.8);y<=Math.ceil(cy+r*2.8);y++)for(let x=Math.floor(cx-r*2.8);x<=Math.ceil(cx+r*2.8);x++){
@@ -160,10 +160,21 @@ function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=
   return 'blank';
 }
 
-function selectOne(pixels,width,height,observed,points,label,warnings,blank=true,scale=FORM.scale,profile=FORM,fillThreshold=0.24) {
-  const marks=points.map(p=>bubbleMark(pixels,width,height,observed,p,scale,profile,fillThreshold));
+function bubbleMean(pixels,width,height,observed,point,scale,profile) {
+  const [cx,cy]=markerMap(point,observed,scale,profile.markers),r=1.1*scale,ix=Math.floor(cx),iy=Math.floor(cy);
+  let total=0,count=0;
+  for(let y=Math.floor(cy-r);y<=Math.ceil(cy+r);y++)for(let x=Math.floor(cx-r);x<=Math.ceil(cx+r);x++)if((x-ix)**2+(y-iy)**2<=r*r&&x>=0&&y>=0&&x<width&&y<height){total+=pixels[y*width+x];count++;}
+  return count?total/count:255;
+}
+
+function selectOne(pixels,width,height,observed,points,label,warnings,blank=true,scale=FORM.scale,profile=FORM,inkThreshold=150,fillFraction=0.24,preferStrongest=false) {
+  const marks=points.map(p=>bubbleMark(pixels,width,height,observed,p,scale,profile,inkThreshold,fillFraction));
   const selected=marks.flatMap((m,i)=>m==='filled'?[i]:[]);
   if(selected.length===1&&!marks.includes('uncertain'))return selected[0];
+  if(preferStrongest&&selected.length>1){
+    const strengths=selected.map(index=>({index,mean:bubbleMean(pixels,width,height,observed,points[index],scale,profile)})).sort((a,b)=>a.mean-b.mean);
+    if(strengths[1].mean-strengths[0].mean>=30){warnings.push(`${label}: nhiều ô, dùng ô đậm nhất; kiểm tra`);return strengths[0].index;}
+  }
   if(selected.length>1||marks.includes('uncertain'))warnings.push(`${label}: tô mờ hoặc nhiều ô`);
   else if(blank)warnings.push(`${label}: bỏ trống`);
   return null;
@@ -178,7 +189,7 @@ function scanProfile(pixels,width,height,scale,profile) {
     warnings.push('Không nhận diện được phiếu hoặc mốc căn chỉnh');return {seatNumber,examCode,answers};
   }
   const digits=(columns,label)=>columns.map((x,col)=>{
-    const selected=selectOne(pixels,width,height,observed,profile.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale,profile,0.16);
+    const selected=selectOne(pixels,width,height,observed,profile.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale,profile,200,0.14,true);
     return selected==null?'?':String(selected);
   }).join('');
   seatNumber=digits(profile.seatColumns,'SBD');examCode=digits(profile.codeColumns,'Mã đề');
