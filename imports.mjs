@@ -42,6 +42,10 @@ function xlsxTables(archive) {
   });
 }
 
+function docxTables(document,ns) {
+  return Array.from(document.getElementsByTagNameNS(ns,'tbl'),table=>Array.from(table.getElementsByTagNameNS(ns,'tr'),row=>Array.from(row.getElementsByTagNameNS(ns,'tc'),cell=>Array.from(cell.getElementsByTagNameNS(ns,'p'),paragraph=>Array.from(paragraph.getElementsByTagNameNS(ns,'t'),node=>node.textContent).join('')).join(' '))));
+}
+
 async function readPdf(file) {
   const task = pdfjs.getDocument({data: await file.arrayBuffer(), isEvalSupported: false});
   const pdf = await task.promise;
@@ -75,7 +79,7 @@ export async function readDocument(file) {
     const document = xml(data);
     const ns='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
     const text=Array.from(document.getElementsByTagNameNS(ns,'p'),paragraph=>Array.from(paragraph.getElementsByTagNameNS(ns,'t'),node=>node.textContent).join('')).join('\n');
-    return {text, tables: []};
+    return {text, tables: docxTables(document,ns)};
   }
   throw new Error('Định dạng chưa hỗ trợ. Dùng CSV, XLSX, DOCX hoặc PDF.');
 }
@@ -159,6 +163,58 @@ export function extractAnswerKeyVariants(text,tables=[]) {
     }
   }
   if(variants.length)return variants;
+  const wordVariants=new Map(),codeForHeader=value=>normalizeHeader(value).match(/^made(?:thi)?(\d{1,4})$/)?.[1];
+  const getWordVariant=code=>{
+    const normalized=String(code||'').padStart(4,'0');
+    if(!/^\d{4}$/.test(normalized))return null;
+    if(!wordVariants.has(normalized)){
+      if(wordVariants.size>=100)throw new Error('Tệp có hơn 100 mã đề. Chia tệp trước khi nhập.');
+      wordVariants.set(normalized,{code:normalized,key:{multipleChoice:Array(40).fill(''),trueFalse:Array(32).fill(null),numeric:Array(6).fill('')},questionCounts:{multipleChoice:0,trueFalse:0,numeric:0}});
+    }
+    return wordVariants.get(normalized);
+  };
+  for(const table of tables){
+    const choiceHeader=table.findIndex(row=>normalizeHeader(row[0])==='cau'&&row.length>1&&row.slice(1).every((value,index)=>Number(value)===index+1));
+    if(choiceHeader>=0){
+      for(const row of table.slice(choiceHeader+1)){
+        if(!/^\d{1,4}$/.test(String(row[0]??'').trim()))continue;
+        const variant=getWordVariant(row[0]);if(!variant)continue;
+        for(let column=1;column<row.length&&column<=40;column++)if(/^[ABCD]$/i.test(String(row[column]??'').trim())){variant.key.multipleChoice[column-1]=String(row[column]).trim().toUpperCase();variant.questionCounts.multipleChoice=Math.max(variant.questionCounts.multipleChoice,column);}
+      }
+      continue;
+    }
+    const statementColumn=table.findIndex(row=>row.some(cell=>normalizeHeader(cell)==='lenhhoi')&&row.some(codeForHeader));
+    if(statementColumn>=0){
+      const headers=table[statementColumn],questionPart=headers.findIndex(cell=>normalizeHeader(cell)==='lenhhoi'),codes=headers.map((value,index)=>({index,code:codeForHeader(value)})).filter(item=>item.code);let question=0;
+      for(const row of table.slice(statementColumn+1)){
+        const number=Number(String(row[0]??'').trim());if(Number.isInteger(number)&&number>0&&number<=8)question=number;
+        const letter=normalizeHeader(row[questionPart]).match(/^([abcd])(?:[.)])?$/)?.[1];if(!question||!letter)continue;
+        const answerIndex=(question-1)*4+'abcd'.indexOf(letter);
+        for(const {index,code} of codes){
+          const value=normalizeHeader(row[index]),answer=value==='d'||value==='dung'?true:value==='s'||value==='sai'?false:null;
+          if(answer!==null){const variant=getWordVariant(code);variant.key.trueFalse[answerIndex]=answer;variant.questionCounts.trueFalse=Math.max(variant.questionCounts.trueFalse,question);}
+        }
+      }
+      continue;
+    }
+    const numericHeader=table.findIndex(row=>normalizeHeader(row[0])==='cau'&&row.some(codeForHeader));
+    if(numericHeader>=0){
+      const headers=table[numericHeader],codes=headers.map((value,index)=>({index,code:codeForHeader(value)})).filter(item=>item.code);
+      for(const row of table.slice(numericHeader+1)){
+        const question=Number(String(row[0]??'').trim());if(!Number.isInteger(question)||question<1||question>6)continue;
+        for(const {index,code} of codes){const value=String(row[index]??'').trim();if(/^-?\d+(?:[.,]\d+)?$/.test(value)){const variant=getWordVariant(code);variant.key.numeric[question-1]=value;variant.questionCounts.numeric=Math.max(variant.questionCounts.numeric,question);}}
+      }
+    }
+  }
+  if(wordVariants.size){
+    const source=plain(text),expected=roman=>{const start=source.indexOf(`phan ${roman}`);if(start<0)return 0;const next=source.indexOf('phan ',start+5),section=source.slice(start,next<0?undefined:next),match=section.match(/tu\s*cau\s*1\s*den\s*cau\s*(\d+)/);return Number(match?.[1])||0;};
+    for(const variant of wordVariants.values()){
+      variant.questionCounts.multipleChoice=Math.max(variant.questionCounts.multipleChoice,Math.min(40,expected('i')));
+      variant.questionCounts.trueFalse=Math.max(variant.questionCounts.trueFalse,Math.min(8,expected('ii')));
+      variant.questionCounts.numeric=Math.max(variant.questionCounts.numeric,Math.min(6,expected('iii')));
+    }
+    return [...wordVariants.values()];
+  }
   const key=extractAnswerKey(text);
   const answerKey={multipleChoice:key.multipleChoice,trueFalse:key.trueFalse,numeric:key.numeric},counts={multipleChoice:answerKey.multipleChoice.findLastIndex(Boolean)+1,trueFalse:Math.ceil((answerKey.trueFalse.findLastIndex(value=>value!==null)+1)/4),numeric:answerKey.numeric.findLastIndex(Boolean)+1};
   return key.code?[{code:key.code,key:answerKey,questionCounts:counts}]:[];

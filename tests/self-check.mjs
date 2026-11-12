@@ -18,6 +18,16 @@ assert.deepEqual(answerVariants[0].key.trueFalse.slice(0,4),[true,true,false,tru
 assert.equal(answerVariants[0].key.numeric[1],'-1,25');
 assert.equal(answerVariants[2].key.multipleChoice[0],'C');
 assert.equal(answerVariants[2].key.numeric[0],'0');
+const wordVariants=extractAnswerKeyVariants('Phần I từ câu 1 đến câu 2. Phần II từ câu 1 đến câu 1. Phần III từ câu 1 đến câu 2.',[
+  [['Câu',1,2],[9001,'A','D']],
+  [['Câu','Lệnh hỏi','Mã đề thi 9001'],[1,'a','Đúng'],[null,'b','Sai'],[null,'c','Đúng'],[null,'d','Sai']],
+  [['Câu','Mã đề thi 9001'],[1,'-2,5'],[2,'0.75']]
+]);
+assert.deepEqual(wordVariants.map(({code})=>code),['9001']);
+assert.equal(wordVariants[0].key.multipleChoice[1],'D');
+assert.deepEqual(wordVariants[0].key.trueFalse.slice(0,4),[true,false,true,false]);
+assert.deepEqual(wordVariants[0].key.numeric.slice(0,2),['-2,5','0.75']);
+assert.deepEqual(wordVariants[0].questionCounts,{multipleChoice:2,trueFalse:1,numeric:2});
 
 assert.equal(canonicalDecimal('-001,2500'), '-1.25');
 assert.equal(canonicalDecimal('-0.000'), '0');
@@ -40,6 +50,8 @@ assert.equal(gradeSubmission(key,answers,policy).trueFalseEarned,28);
 const rows=parseCSV('\uFEFFSBD;Họ tên;Lớp\r\n00000123;"Nguyễn, An";12A1\r\n00000124;"Bình ""B""";12A1');
 assert.deepEqual(rows[1],['00000123','Nguyễn, An','12A1']);
 assert.equal(rosterRows(rows)[1].fullName,'Bình "B"');
+assert.deepEqual(rosterRows(parseCSV('\uFEFFSBD;Họ tên;Lớp\r\n')),[]);
+assert.throws(()=>rosterRows(parseCSV('\uFEFFSBD;Lớp\r\n123;12A1')),/SBD và họ tên/);
 assert.match(scoreCSV([{seatNumber:'=2+2',studentName:'An',className:'12A1',examCode:'2025',score:gradeSubmission(key,{...answers},policy),needsReview:true}]),/"'=2\+2"/);
 
 const width=595*FORM.scale,height=842*FORM.scale,gray=new Uint8Array(width*height).fill(255),skew=p=>[1+FORM.scale*(p[0]+0.02*p[1]),2+FORM.scale*(p[1]+0.01*p[0])];
@@ -77,10 +89,10 @@ assert.equal(flagged.answers.multipleChoice[q],null);
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('I-1')));
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('đủ 2 trang')));
 
-const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11'];
+const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
-assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10'].sort());
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11'].sort());
 
 for(const [system,saved,expected] of [['dark',null,'dark'],['light',null,'light'],['dark','light','light']]){
   const document={documentElement:{dataset:{}},querySelector:()=>({setAttribute(name,value){this[name]=value;}})};
