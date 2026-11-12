@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { FORM, canonicalDecimal, emptyAnswers, gradeSubmission, hasFormMarkers, parseCSV, rosterRows, scanForm, scanSignature, scoreCSV } from '../core.mjs';
+import { FORM, PHOTO_FORM, canonicalDecimal, emptyAnswers, gradeSubmission, hasFormMarkers, parseCSV, rosterRows, scanForm, scanSignature, scoreCSV } from '../core.mjs';
 import { extractAnswerKey, extractAnswerKeyVariants } from '../imports.mjs';
 
 assert.equal(extractAnswerKey('MÃ ĐỀ: 1234').code,'1234');
@@ -65,7 +65,7 @@ for(let c=0;c<4;c++)fillBubble([FORM.codeColumns[c],FORM.identityRows[Number(cod
 for(let i=0;i<40;i++){const columns=FORM.mcColumns[Math.floor(i/10)],row=FORM.mcRows[i%10];fillBubble([columns[i%4],row]);}
 for(let i=0;i<32;i++)fillBubble([FORM.tfColumns[Math.floor(i/4)][i%4===0?0:1],FORM.tfRows[i%4]]);
 for(const columns of FORM.numericColumns){fillBubble([columns[0],FORM.signRow]);fillBubble([columns[1],FORM.decimalRow]);for(const [place,digit] of [[1,1],[2,2],[3,5]])fillBubble([columns[place],FORM.digitRows[digit]]);}
-const scan=scanForm(gray,width,height,2);
+const scan=scanForm(gray,width,height);
 assert.equal(scan.seatNumber,seat);
 assert.equal(scan.examCode,code);
 assert.equal(scan.answers.multipleChoice.length,40);
@@ -76,7 +76,7 @@ assert.equal(scan.answers.reviewItems.length,0);
 const liveScale=2,liveWidth=FORM.pageWidth*liveScale,liveHeight=FORM.pageHeight*liveScale,liveGray=new Uint8Array(liveWidth*liveHeight);
 for(let y=0;y<liveHeight;y++)for(let x=0;x<liveWidth;x++)liveGray[y*liveWidth+x]=gray[Math.floor(y*FORM.scale/liveScale)*width+Math.floor(x*FORM.scale/liveScale)];
 assert.equal(hasFormMarkers(liveGray,liveWidth,liveHeight,liveScale),true);
-const liveScan=scanForm(liveGray,liveWidth,liveHeight,2,liveScale);
+const liveScan=scanForm(liveGray,liveWidth,liveHeight,liveScale);
 assert.equal(liveScan.seatNumber,seat);
 assert.equal(liveScan.examCode,code);
 assert.equal(scanSignature(liveScan),scanSignature(scan));
@@ -84,15 +84,29 @@ const changedScan={...liveScan,answers:{...liveScan.answers,multipleChoice:liveS
 assert.notEqual(scanSignature(changedScan),scanSignature(liveScan));
 
 const uncertain=new Uint8Array(gray);const q=0,xy=skew([FORM.mcColumns[0][1],FORM.mcRows[0]]);for(let y=Math.floor(xy[1]-10);y<=xy[1]+10;y++)for(let x=Math.floor(xy[0]-10);x<=xy[0]+10;x++)if(x>=0&&y>=0&&x<width&&y<height)uncertain[y*width+x]=185;
-const flagged=scanForm(uncertain,width,height,1);
+const flagged=scanForm(uncertain,width,height);
 assert.equal(flagged.answers.multipleChoice[q],null);
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('I-1')));
-assert.ok(flagged.answers.reviewItems.some(item=>item.includes('đủ 2 trang')));
+assert.ok(!flagged.answers.reviewItems.some(item=>item.includes('trang')));
 
-const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12'];
+const photoGray=new Uint8Array(width*height).fill(255);
+function photoMark(point,radius,color=0){const cx=point[0]*FORM.scale,cy=point[1]*FORM.scale;for(let y=Math.floor(cy-radius);y<=cy+radius;y++)for(let x=Math.floor(cx-radius);x<=cx+radius;x++)if(x>=0&&y>=0&&x<width&&y<height&&(x-cx)**2+(y-cy)**2<=radius**2)photoGray[y*width+x]=color;}
+function photoSquare(point,side){const cx=point[0]*FORM.scale,cy=point[1]*FORM.scale,r=side*FORM.scale/2;for(let y=cy-r;y<=cy+r;y++)for(let x=cx-r;x<=cx+r;x++)if(x>=0&&y>=0&&x<width&&y<height)photoGray[Math.floor(y)*width+Math.floor(x)]=0;}
+for(const point of PHOTO_FORM.markers)photoSquare(point,12);
+for(const point of PHOTO_FORM.orientation)photoSquare(point,8);
+for(let c=0;c<8;c++)photoMark([PHOTO_FORM.seatColumns[c],PHOTO_FORM.identityRows[Number(seat[c])]],FORM.scale*3.5);
+for(let c=0;c<4;c++)photoMark([PHOTO_FORM.codeColumns[c],PHOTO_FORM.identityRows[Number(code[c])]],FORM.scale*3.5);
+for(let i=0;i<40;i++){const columns=PHOTO_FORM.mcColumns[Math.floor(i/10)],row=PHOTO_FORM.mcRows[i%10];photoMark([columns[i%4],row],FORM.scale*3.5);}
+for(let i=0;i<32;i++)photoMark([PHOTO_FORM.tfColumns[Math.floor(i/4)][i%2],PHOTO_FORM.tfRows[i%4]],FORM.scale*3.5);
+const photoScan=scanForm(photoGray,width,height);
+assert.equal(photoScan.seatNumber,seat);
+assert.equal(photoScan.examCode,code);
+assert.ok(photoScan.answers.multipleChoice.every((value,index)=>value==='ABCD'[index%4]));
+
+const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
-assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11'].sort());
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12'].sort());
 
 for(const [system,saved,expected] of [['dark',null,'dark'],['light',null,'light'],['dark','light','light']]){
   const document={documentElement:{dataset:{}},querySelector:()=>({setAttribute(name,value){this[name]=value;}})};

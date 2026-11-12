@@ -13,6 +13,17 @@ export const FORM = Object.freeze({
   signRow: 625.7, decimalRow: 638.6,
   digitRows: [651.3,664.1,676.9,689.7,702.6,715.4,728.3,741,753.9,766.7]
 });
+export const PHOTO_FORM = Object.freeze({
+  ...FORM,
+  markers:[[38.3,48],[542.5,48],[33,798],[546,797]],orientation:[[379,47.5]],
+  identityRows:[101.8,117.6,133.3,148.9,164.9,180.8,196.6,212.5,228.4,244.3],
+  seatColumns:[390.5,401.6,412.8,424.5,434.6,445.5,456.6,467.5],codeColumns:[495.5,506.4,516.9,527.8],
+  mcColumns:[[80.5,104.5,129.3,152.5],[200.5,224.5,248.2,271.5],[318.5,342.5,365.9,389.5],[437.4,461.3,485.2,508.5]],
+  mcRows:[323,335,347.2,359.2,371.7,384.5,396.9,408.7,420.9,433.2],
+  tfColumns:[[79.5,103.8],[129,152.5],[200.5,224.5],[248.5,271.5],[318.5,342.5],[366.8,390.5],[438,462],[486,510.2]],tfRows:[500.5,512.6,524.7,536.8],
+  numericColumns:[[74.8,91.5,107.9,124.5],[151.8,168.2,184.8,201.2],[228.4,244.8,261.4,278.2],[304.7,322.1,338.7,355.5],[382.4,399.1,416,432.5],[459.4,476.2,492.7,509.5]],
+  signRow:610.2,decimalRow:622.7,digitRows:[636.4,649,662,675.1,687.7,700.2,713.4,725.8,739.2,752.4]
+});
 
 export const emptyAnswers = () => ({
   multipleChoice: Array(40).fill(null), trueFalse: Array(32).fill(null), numeric: Array(6).fill(null), reviewItems: []
@@ -94,10 +105,10 @@ export function rosterRows(rows, defaultClass = '') {
   });
 }
 
-const markerMap = (point, observed, scale=FORM.scale) => {
+const markerMap = (point, observed, scale=FORM.scale, markers=FORM.markers) => {
   // shortcut: bilinear markers do not correct strong perspective, upgrade to a projective homography when real-paper checks need it.
-  const [x0,y0]=FORM.markers[0],y1=FORM.markers[2][1];
-  const u=(point[0]-x0)/(FORM.markers[1][0]-x0), v=(point[1]-y0)/(y1-y0);
+  const [x0,y0]=markers[0],y1=markers[2][1];
+  const u=(point[0]-x0)/(markers[1][0]-x0), v=(point[1]-y0)/(y1-y0);
   const top=[observed[0][0]+(observed[1][0]-observed[0][0])*u,observed[0][1]+(observed[1][1]-observed[0][1])*u];
   const bottom=[observed[2][0]+(observed[3][0]-observed[2][0])*u,observed[2][1]+(observed[3][1]-observed[2][1])*u];
   return [(top[0]+(bottom[0]-top[0])*v)*scale,(top[1]+(bottom[1]-top[1])*v)*scale];
@@ -130,22 +141,27 @@ function findMarker(pixels,width,height,center,minSize=10,scale=FORM.scale) {
   }
   return best;
 }
-
-function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale) {
-  const [cx,cy]=markerMap(point,observed,scale),r=1.1*scale,ix=Math.floor(cx),iy=Math.floor(cy);
-  let dark=0,visible=0,count=0;
+function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=FORM) {
+  const [cx,cy]=markerMap(point,observed,scale,profile.markers),r=1.1*scale,ix=Math.floor(cx),iy=Math.floor(cy);
+  let dark=0,visible=0,count=0,centerTotal=0;
   for(let y=Math.floor(cy-r);y<=Math.ceil(cy+r);y++)for(let x=Math.floor(cx-r);x<=Math.ceil(cx+r);x++){
     if((x-ix)**2+(y-iy)**2>r*r||x<0||y<0||x>=width||y>=height)continue;
-    const gray=pixels[y*width+x];count++;if(gray<150)dark++;if(gray<235)visible++;
+    const gray=pixels[y*width+x];count++;centerTotal+=gray;if(gray<150)dark++;if(gray<235)visible++;
   }
   if(!count)return 'uncertain';
   if(dark/count>=0.24)return 'filled';
-  if(visible/count>=0.08)return 'uncertain';
+  if(profile===FORM)return visible/count>=0.08?'uncertain':'blank';
+  let backgroundTotal=0,backgroundCount=0;
+  for(let y=Math.floor(cy-r*2.8);y<=Math.ceil(cy+r*2.8);y++)for(let x=Math.floor(cx-r*2.8);x<=Math.ceil(cx+r*2.8);x++){
+    const d=(x-ix)**2+(y-iy)**2;if(d<r*r*2.25||d>r*r*7.84||x<0||y<0||x>=width||y>=height)continue;
+    backgroundTotal+=pixels[y*width+x];backgroundCount++;
+  }
+  if(visible/count>=0.08&&backgroundCount&&backgroundTotal/backgroundCount-centerTotal/count>18)return 'uncertain';
   return 'blank';
 }
 
-function selectOne(pixels,width,height,observed,points,label,warnings,blank=true,scale=FORM.scale) {
-  const marks=points.map(p=>bubbleMark(pixels,width,height,observed,p,scale));
+function selectOne(pixels,width,height,observed,points,label,warnings,blank=true,scale=FORM.scale,profile=FORM) {
+  const marks=points.map(p=>bubbleMark(pixels,width,height,observed,p,scale,profile));
   const selected=marks.flatMap((m,i)=>m==='filled'?[i]:[]);
   if(selected.length===1&&!marks.includes('uncertain'))return selected[0];
   if(selected.length>1||marks.includes('uncertain'))warnings.push(`${label}: tô mờ hoặc nhiều ô`);
@@ -153,34 +169,33 @@ function selectOne(pixels,width,height,observed,points,label,warnings,blank=true
   return null;
 }
 
-export function scanForm(pixels,width,height,pageCount=2,scale=FORM.scale) {
+function scanProfile(pixels,width,height,scale,profile) {
   const answers=emptyAnswers(), warnings=answers.reviewItems;
   let seatNumber='',examCode='';
-  if(pageCount!==2)warnings.push(`Cần quét đủ 2 trang; hiện có ${pageCount}`);
-  if(Math.abs(width/height-FORM.pageWidth/FORM.pageHeight)>=0.15){warnings.push('Tỷ lệ ảnh khác mẫu QM 2025');return {seatNumber,examCode,answers};}
-  const observed=FORM.markers.map(p=>findMarker(pixels,width,height,p,10,scale));
-  if(observed.some(x=>!x)||!FORM.orientation.some(p=>findMarker(pixels,width,height,p,5,scale))||observed[1][0]<=observed[0][0]||observed[2][1]<=observed[0][1]){
+  if(Math.abs(width/height-profile.pageWidth/profile.pageHeight)>=0.15){warnings.push('Tỷ lệ ảnh khác mẫu phiếu');return {seatNumber,examCode,answers};}
+  const observed=profile.markers.map(p=>findMarker(pixels,width,height,p,10,scale));
+  if(observed.some(x=>!x)||!profile.orientation.some(p=>findMarker(pixels,width,height,p,5,scale))||observed[1][0]<=observed[0][0]||observed[2][1]<=observed[0][1]){
     warnings.push('Không nhận diện được phiếu hoặc mốc căn chỉnh');return {seatNumber,examCode,answers};
   }
   const digits=(columns,label)=>columns.map((x,col)=>{
-    const selected=selectOne(pixels,width,height,observed,FORM.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale);
+    const selected=selectOne(pixels,width,height,observed,profile.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale,profile);
     return selected==null?'?':String(selected);
   }).join('');
-  seatNumber=digits(FORM.seatColumns,'SBD');examCode=digits(FORM.codeColumns,'Mã đề');
+  seatNumber=digits(profile.seatColumns,'SBD');examCode=digits(profile.codeColumns,'Mã đề');
   for(let block=0;block<4;block++)for(let row=0;row<10;row++){
-    const index=block*10+row,xs=FORM.mcColumns[block],y=FORM.mcRows[row];
-    const selected=selectOne(pixels,width,height,observed,xs.map(x=>[x,y]),`I-${index+1}`,warnings,true,scale);
+    const index=block*10+row,xs=profile.mcColumns[block],y=profile.mcRows[row];
+    const selected=selectOne(pixels,width,height,observed,xs.map(x=>[x,y]),`I-${index+1}`,warnings,true,scale,profile);
     if(selected!=null)answers.multipleChoice[index]='ABCD'[selected];
   }
   for(let q=0;q<8;q++)for(let j=0;j<4;j++){
-    const selected=selectOne(pixels,width,height,observed,FORM.tfColumns[q].map(x=>[x,FORM.tfRows[j]]),`II-${q+1}${'abcd'[j]}`,warnings,true,scale);
+    const selected=selectOne(pixels,width,height,observed,profile.tfColumns[q].map(x=>[x,profile.tfRows[j]]),`II-${q+1}${'abcd'[j]}`,warnings,true,scale,profile);
     if(selected!=null)answers.trueFalse[q*4+j]=selected===0;
   }
   for(let q=0;q<6;q++){
-    const cols=FORM.numericColumns[q],sign=bubbleMark(pixels,width,height,observed,[cols[0],FORM.signRow],scale);
-    const decimals=[cols[1],cols[2]].map(x=>bubbleMark(pixels,width,height,observed,[x,FORM.decimalRow],scale));
-    const selected=cols.map((x,place)=>selectOne(pixels,width,height,observed,FORM.digitRows.map(y=>[x,y]),`III-${q+1}-${place+1}`,warnings,false,scale));
-    const states=cols.map(x=>FORM.digitRows.map(y=>bubbleMark(pixels,width,height,observed,[x,y],scale)));
+    const cols=profile.numericColumns[q],sign=bubbleMark(pixels,width,height,observed,[cols[0],profile.signRow],scale,profile);
+    const decimals=[cols[1],cols[2]].map(x=>bubbleMark(pixels,width,height,observed,[x,profile.decimalRow],scale,profile));
+    const selected=cols.map((x,place)=>selectOne(pixels,width,height,observed,profile.digitRows.map(y=>[x,y]),`III-${q+1}-${place+1}`,warnings,false,scale,profile));
+    const states=cols.map(x=>profile.digitRows.map(y=>bubbleMark(pixels,width,height,observed,[x,y],scale,profile)));
     let invalid=states.some(m=>m.filter(x=>x==='filled').length>1||m.includes('uncertain'))||sign==='uncertain'||decimals.includes('uncertain');
     const decimalPosition=decimals.flatMap((m,i)=>m==='filled'?[i+1]:[]);
     if(decimalPosition.length>1)invalid=true;
@@ -195,10 +210,21 @@ export function scanForm(pixels,width,height,pageCount=2,scale=FORM.scale) {
   return {seatNumber,examCode,answers};
 }
 
+export function scanForm(pixels,width,height,scale=FORM.scale) {
+  const scans=[FORM,PHOTO_FORM].map(profile=>{
+    const scan=scanProfile(pixels,width,height,scale,profile),markers=profile.markers.map(point=>findMarker(pixels,width,height,point,10,scale));
+    const fit=markers.some(point=>!point)||scan.answers.reviewItems.includes('Không nhận diện được phiếu hoặc mốc căn chỉnh')?Infinity:markers.reduce((sum,point,index)=>sum+(point[0]-profile.markers[index][0])**2+(point[1]-profile.markers[index][1])**2,0);
+    return {scan,fit,name:profile===FORM?'qm':'photo'};
+  });
+  const chosen=scans.sort((a,b)=>a.fit-b.fit||a.scan.answers.reviewItems.length-b.scan.answers.reviewItems.length)[0];chosen.scan.testProfile=chosen.name;return chosen.scan;
+}
+
 export function hasFormMarkers(pixels,width,height,scale=FORM.scale) {
   if(!width||!height||pixels.length<width*height||Math.abs(width/height-FORM.pageWidth/FORM.pageHeight)>=0.15)return false;
-  const observed=FORM.markers.map(p=>findMarker(pixels,width,height,p,10,scale));
-  return !observed.some(x=>!x)&&FORM.orientation.some(p=>findMarker(pixels,width,height,p,5,scale))&&observed[1][0]>observed[0][0]&&observed[2][1]>observed[0][1];
+  return [FORM,PHOTO_FORM].some(profile=>{
+    const observed=profile.markers.map(p=>findMarker(pixels,width,height,p,10,scale));
+    return !observed.some(x=>!x)&&profile.orientation.some(p=>findMarker(pixels,width,height,p,5,scale))&&observed[1][0]>observed[0][0]&&observed[2][1]>observed[0][1];
+  });
 }
 export const scanSignature=({seatNumber,examCode,answers})=>JSON.stringify([seatNumber,examCode,answers.multipleChoice,answers.trueFalse,answers.numeric]);
 

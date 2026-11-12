@@ -87,17 +87,12 @@ export async function readDocument(file) {
 export async function renderPdfPages(file) {
   if (!file || file.size > MAX_FILE) throw new Error('PDF tối đa 50 MB.');
   const pdf = await pdfjs.getDocument({data: await file.arrayBuffer(), isEvalSupported: false}).promise;
-  if (!pdf.numPages || pdf.numPages > 50) throw new Error('PDF phải có từ 1 đến 50 trang.');
-  const pages=[];
-  for(let number=1;number<=Math.min(2,pdf.numPages);number++){
-    const page=await pdf.getPage(number),viewport=page.getViewport({scale:1}),scale=Math.min(3*595/viewport.width,3*842/viewport.height,3);
-    const rendered=page.getViewport({scale}),canvas=document.createElement('canvas');canvas.width=Math.ceil(rendered.width);canvas.height=Math.ceil(rendered.height);
-    const context=canvas.getContext('2d',{alpha:false});context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);
-    await page.render({canvasContext:context,viewport:rendered,background:'rgb(255,255,255)'}).promise;
-    pages.push(await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Không dựng được trang PDF.')),'image/jpeg',0.92)));
-  }
-  pages.totalPages=pdf.numPages;
-  return pages;
+  if (!pdf.numPages) throw new Error('PDF không có trang hợp lệ.');
+  const page=await pdf.getPage(1),viewport=page.getViewport({scale:1}),scale=Math.min(3*595/viewport.width,3*842/viewport.height,3);
+  const rendered=page.getViewport({scale}),canvas=document.createElement('canvas');canvas.width=Math.ceil(rendered.width);canvas.height=Math.ceil(rendered.height);
+  const context=canvas.getContext('2d',{alpha:false});context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);
+  await page.render({canvasContext:context,viewport:rendered,background:'rgb(255,255,255)'}).promise;
+  return [await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Không dựng được trang PDF.')),'image/jpeg',0.92))];
 }
 
 export function extractAnswerKey(text) {
