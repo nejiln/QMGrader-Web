@@ -15,7 +15,11 @@ const state = {
   importDraft: null,
   examKeyVariants: null,
   activeExamCode: '',
-  viewer: { zoom: 1, rotate: 0, panX: 0, panY: 0, page: 1, highlightKey: '' }
+  viewer: { zoom: 1, rotate: 0, panX: 0, panY: 0, page: 1, highlightKey: '' },
+  selectMode: { exams: false, batches: false, submissions: false, roster: false },
+  selected: { exams: new Set(), batches: new Set(), submissions: new Set(), roster: new Set() },
+  search: { exams: '', batches: '', submissions: '', roster: '' },
+  submissionFilter: 'all'
 };
 
 const pageLabels = {
@@ -133,6 +137,34 @@ function deletePaper(submission) {
   });
 }
 
+async function deleteSubmissionsCascade(ids) {
+  const idSet = new Set(ids);
+  const subs = (await all('submissions')).filter(s => idSet.has(s.id));
+  for (const sub of subs) await deletePaper(sub);
+}
+
+async function deleteBatchesCascade(batchIds) {
+  const idSet = new Set(batchIds);
+  const subs = (await all('submissions')).filter(s => idSet.has(s.batchId));
+  for (const sub of subs) await deletePaper(sub);
+  for (const id of idSet) await remove('batches', id);
+}
+
+function bulkBarMarkup(scope, visibleIds, actionsHtml) {
+  if (!state.selectMode[scope]) return '';
+  const selected = state.selected[scope];
+  const allSelected = visibleIds.length > 0 && visibleIds.every(id => selected.has(id));
+  return `
+    <div class="bulk-bar">
+      <div class="bulk-bar-left">
+        <button type="button" class="button secondary sm" data-action="${allSelected ? 'deselect-all' : 'select-all'}" data-scope="${scope}" data-ids="${esc(visibleIds.join(','))}">${allSelected ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}</button>
+        <span class="bulk-count">Đã chọn ${selected.size}</span>
+      </div>
+      <div class="bulk-bar-right">${actionsHtml}</div>
+    </div>
+  `;
+}
+
 const localState = async () => ({ exams: await all('exams'), batches: await all('batches'), roster: await all('roster'), submissions: await all('submissions') });
 function notify(message) { toastBox.textContent = message; toastBox.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toastBox.classList.remove('show'), 2900); }
 function releaseURLs() { for (const url of objectURLs) URL.revokeObjectURL(url); objectURLs = []; }
@@ -245,20 +277,28 @@ function batchListPage({ batches, exams, submissions }) {
 }
 
 function examsPage({ exams }) {
-  const rows = exams.map(exam => {
+  const q = state.search.exams.trim().toLowerCase();
+  const filtered = q ? exams.filter(e => `${e.name} ${e.code}`.toLowerCase().includes(q)) : exams;
+  const selecting = state.selectMode.exams, sel = state.selected.exams;
+  const rows = filtered.map(exam => {
     const counts = exam.questionCounts || { multipleChoice: 40, trueFalse: 8, numeric: 6 };
-    return `<button class="card batch-card" data-action="edit-exam" data-id="${esc(exam.id)}"><span class="card-icon">${icon('exam')}</span><span class="card-copy"><strong>${esc(exam.name)}</strong><p>Mã ${esc(exam.code)} · ${examComplete(exam) ? `Đủ ${counts.multipleChoice + counts.trueFalse * 4 + counts.numeric} mục` : answerStatus(exam)}</p></span><span class="card-end">${icon('arrow')}</span></button>`;
+    const checked = sel.has(exam.id);
+    const actionAttr = selecting ? `data-action="toggle-select-item" data-scope="exams" data-id="${esc(exam.id)}"` : `data-action="edit-exam" data-id="${esc(exam.id)}"`;
+    return `<button class="card batch-card ${checked ? 'row-selected' : ''}" ${actionAttr}>${selecting ? `<input type="checkbox" class="row-check" tabindex="-1" ${checked ? 'checked' : ''} aria-label="Chọn ${esc(exam.name)}">` : `<span class="card-icon">${icon('exam')}</span>`}<span class="card-copy"><strong>${esc(exam.name)}</strong><p>Mã ${esc(exam.code)} · ${examComplete(exam) ? `Đủ ${counts.multipleChoice + counts.trueFalse * 4 + counts.numeric} mục` : answerStatus(exam)}</p></span><span class="card-end">${selecting ? '' : icon('arrow')}</span></button>`;
   }).join('');
   return `
     <p class="eyebrow">Thiết lập đáp án và thang điểm</p>
     <div class="toolbar">
       <div><h1>Đề thi</h1><p class="lede">Tạo khóa đáp án một lần. Đợt chấm đối chiếu tự động theo mã đề.</p></div>
       <div class="actions" style="margin:0">
+        ${exams.length ? `<button class="button secondary sm" data-action="toggle-select-mode" data-scope="exams">${selecting ? 'Xong' : 'Chọn'}</button>` : ''}
         ${exams.length ? `<button class="button secondary" data-action="scan-entry">${icon('scan')}Quét phiếu</button>` : ''}
         <button class="button" data-action="edit-exam">${icon('plus')}Tạo đề</button>
       </div>
     </div>
-    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>Chưa có đề thi. Tạo đáp án và áp dụng thang điểm chuẩn THPT 2025 để bắt đầu.</p><button class="button" data-action="edit-exam">${icon('plus')}Tạo đề đầu tiên</button></div>`}
+    ${exams.length ? `<div class="list-controls"><input type="search" class="search-input" data-search="exams" value="${esc(state.search.exams)}" placeholder="Tìm theo tên đề hoặc mã đề..."></div>` : ''}
+    ${bulkBarMarkup('exams', filtered.map(e => e.id), `<button type="button" class="button danger sm" data-action="bulk-delete-exams" ${sel.size ? '' : 'disabled'}>Xóa đã chọn (${sel.size})</button>`)}
+    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>${q ? 'Không tìm thấy đề thi phù hợp.' : 'Chưa có đề thi. Tạo đáp án và áp dụng thang điểm chuẩn THPT 2025 để bắt đầu.'}</p>${q ? '' : `<button class="button" data-action="edit-exam">${icon('plus')}Tạo đề đầu tiên</button>`}</div>`}
   `;
 }
 
@@ -277,10 +317,16 @@ function examComplete(exam) {
 }
 
 function rosterPage({ roster }) {
-  const classes = [...new Set(roster.map(row => row.className).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
+  const q = state.search.roster.trim().toLowerCase();
+  const filtered = q ? roster.filter(r => `${r.fullName} ${r.seatNumber} ${r.className}`.toLowerCase().includes(q)) : roster;
+  const selecting = state.selectMode.roster, sel = state.selected.roster;
+  const classes = [...new Set(filtered.map(row => row.className).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
   const groups = classes.map(name => {
-    const rows = roster.filter(row => row.className === name);
-    return `<details class="card answer-card"><summary>${esc(name)} <span class="pill neutral">${rows.length} học sinh</span></summary><div class="stack" style="margin-top:12px">${rows.map(row => `<div class="submission-row"><span class="avatar-number">${esc(row.seatNumber.slice(-3))}</span><span class="card-copy"><strong>${esc(row.fullName)}</strong><p>SBD ${esc(row.seatNumber)}</p></span><button class="button quiet sm" data-action="delete-roster" data-id="${esc(row.id)}" aria-label="Xóa ${esc(row.fullName)}">Xóa</button></div>`).join('')}</div></details>`;
+    const rows = filtered.filter(row => row.className === name);
+    return `<details class="card answer-card" open><summary><span>${esc(name)} <span class="pill neutral">${rows.length} học sinh</span></span><span class="class-head-actions"><button type="button" class="button danger sm" data-action="delete-roster-class" data-class="${esc(name)}">Xóa lớp</button></span></summary><div class="stack" style="margin-top:12px">${rows.map(row => {
+      const checked = sel.has(row.id);
+      return `<div class="submission-row ${checked ? 'row-selected' : ''}" ${selecting ? `data-action="toggle-select-item" data-scope="roster" data-id="${esc(row.id)}"` : ''}>${selecting ? `<input type="checkbox" class="row-check" tabindex="-1" ${checked ? 'checked' : ''} aria-label="Chọn ${esc(row.fullName)}">` : `<span class="avatar-number">${esc(row.seatNumber.slice(-3))}</span>`}<span class="card-copy"><strong>${esc(row.fullName)}</strong><p>SBD ${esc(row.seatNumber)}</p></span>${selecting ? '' : `<div class="row-actions"><button type="button" class="button quiet sm" data-action="edit-roster-item" data-id="${esc(row.id)}">Sửa</button><button type="button" class="button danger sm" data-action="delete-roster" data-id="${esc(row.id)}" aria-label="Xóa ${esc(row.fullName)}">Xóa</button></div>`}</div>`;
+    }).join('')}</div></details>`;
   }).join('');
 
   return `
@@ -288,8 +334,10 @@ function rosterPage({ roster }) {
     <div class="toolbar">
       <div><h1>Danh sách lớp</h1><p class="lede">Họ tên học sinh tự động điền khi SBD khớp. Dữ liệu lưu cục bộ trên thiết bị.</p></div>
       <div class="actions" style="margin:0">
+        ${roster.length ? `<button class="button secondary sm" data-action="toggle-select-mode" data-scope="roster">${selecting ? 'Xong' : 'Chọn'}</button>` : ''}
         <button class="button secondary sm" data-action="download-roster-template">${icon('download')}Mẫu CSV</button>
         <button class="button secondary sm" data-action="download-roster-xlsx">${icon('download')}Mẫu Excel</button>
+        <button class="button sm" data-action="add-roster-item">${icon('plus')}Thêm học sinh</button>
       </div>
     </div>
     <div class="dropzone" id="roster-dropzone">
@@ -302,19 +350,34 @@ function rosterPage({ roster }) {
         <button class="button" type="button" data-action="import-roster">${icon('file')}Chọn tệp danh sách</button>
       </div>
     </div>
-    ${groups ? `<div class="section-heading"><div><h2>Các lớp đã nhập (${classes.length})</h2></div></div><div class="stack">${groups}</div>` : `<div class="empty"><p>Chưa có danh sách lớp nào. Kéo thả tệp CSV/XLSX vào khung phía trên hoặc tải file mẫu để chuẩn bị dữ liệu.</p></div>`}
+    ${roster.length ? `<div class="list-controls"><input type="search" class="search-input" data-search="roster" value="${esc(state.search.roster)}" placeholder="Tìm học sinh theo tên, SBD hoặc lớp..."></div>` : ''}
+    ${bulkBarMarkup('roster', filtered.map(r => r.id), `<button type="button" class="button secondary sm" data-action="bulk-move-roster" ${sel.size ? '' : 'disabled'}>Chuyển lớp</button><button type="button" class="button danger sm" data-action="bulk-delete-roster" ${sel.size ? '' : 'disabled'}>Xóa đã chọn (${sel.size})</button>`)}
+    ${groups ? `<div class="section-heading"><div><h2>Các lớp đã nhập (${classes.length})</h2></div></div><div class="stack">${groups}</div>` : `<div class="empty"><p>${q ? 'Không tìm thấy học sinh phù hợp.' : 'Chưa có danh sách lớp nào. Kéo thả tệp CSV/XLSX vào khung phía trên hoặc bấm Thêm học sinh.'}</p></div>`}
   `;
 }
 
 function batchPage({ batches }) {
-  const rows = sortNewest(batches.slice()).map(batch => `<button class="card batch-card" data-action="open-batch" data-id="${esc(batch.id)}"><span class="card-icon">${icon('people')}</span><span class="card-copy"><strong>${esc(batch.className)}</strong><p>${new Date(batch.createdAt).toLocaleDateString('vi-VN')} · ${esc(batch.examName)}</p></span><span class="card-end">Mở ${icon('arrow')}</span></button>`).join('');
+  const q = state.search.batches.trim().toLowerCase();
+  const sorted = sortNewest(batches.slice());
+  const filtered = q ? sorted.filter(b => `${b.className} ${b.examName}`.toLowerCase().includes(q)) : sorted;
+  const selecting = state.selectMode.batches, sel = state.selected.batches;
+  const rows = filtered.map(batch => {
+    const checked = sel.has(batch.id);
+    const actionAttr = selecting ? `data-action="toggle-select-item" data-scope="batches" data-id="${esc(batch.id)}"` : `data-action="open-batch" data-id="${esc(batch.id)}"`;
+    return `<button class="card batch-card ${checked ? 'row-selected' : ''}" ${actionAttr}>${selecting ? `<input type="checkbox" class="row-check" tabindex="-1" ${checked ? 'checked' : ''} aria-label="Chọn ${esc(batch.className)}">` : `<span class="card-icon">${icon('people')}</span>`}<span class="card-copy"><strong>${esc(batch.className)}</strong><p>${new Date(batch.createdAt).toLocaleDateString('vi-VN')} · ${esc(batch.examName)}</p></span><span class="card-end">${selecting ? '' : `Mở ${icon('arrow')}`}</span></button>`;
+  }).join('');
   return `
     <p class="eyebrow">Lớp học và kết quả</p>
     <div class="toolbar">
       <div><h1>Đợt chấm</h1><p class="lede">Mỗi đợt tối đa 100 bài, gắn với một lớp và một đề thi.</p></div>
-      <button class="button" data-action="new-batch">${icon('plus')}Tạo đợt</button>
+      <div class="actions" style="margin:0">
+        ${batches.length ? `<button class="button secondary sm" data-action="toggle-select-mode" data-scope="batches">${selecting ? 'Xong' : 'Chọn'}</button>` : ''}
+        <button class="button" data-action="new-batch">${icon('plus')}Tạo đợt</button>
+      </div>
     </div>
-    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>Tạo đề thi trước, sau đó mở đợt chấm theo lớp.</p><button class="button" data-action="new-batch">${icon('plus')}Tạo đợt chấm</button></div>`}
+    ${batches.length ? `<div class="list-controls"><input type="search" class="search-input" data-search="batches" value="${esc(state.search.batches)}" placeholder="Tìm đợt chấm theo tên lớp hoặc đề..."></div>` : ''}
+    ${bulkBarMarkup('batches', filtered.map(b => b.id), `<button type="button" class="button secondary sm" data-action="bulk-export-batches" ${sel.size ? '' : 'disabled'}>Xuất CSV gộp</button><button type="button" class="button danger sm" data-action="bulk-delete-batches" ${sel.size ? '' : 'disabled'}>Xóa đợt (${sel.size})</button>`)}
+    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>${q ? 'Không tìm thấy đợt chấm phù hợp.' : 'Tạo đề thi trước, sau đó mở đợt chấm theo lớp.'}</p>${q ? '' : `<button class="button" data-action="new-batch">${icon('plus')}Tạo đợt chấm</button>`}</div>`}
   `;
 }
 
@@ -323,7 +386,20 @@ function batchDetailPage({ batches, exams, submissions, roster }) {
   if (!batch) { state.view = 'batches'; return batchListPage({ batches, exams, submissions }); }
   const exam = exams.find(item => item.id === batch.examId), papers = sortNewest(submissions.filter(item => item.batchId === batch.id).slice());
   const rosterClass = roster.filter(item => item.className === batch.className);
-  const rows = papers.map(s => `<button class="card submission-row" data-action="open-submission" data-id="${esc(s.id)}"><span class="avatar-number">${esc(s.seatNumber === '????????' ? '?' : s.seatNumber.slice(-3))}</span><span class="card-copy"><strong>${esc(s.studentName || 'Chưa ghép tên')} · SBD ${esc(s.seatNumber)}</strong><p>${statusPill(s)} ${s.examCode === exam?.code ? '' : `<span class="pill red">Mã ${esc(s.examCode)} ≠ ${esc(exam?.code)}</span>`}</p></span><span class="card-end"><strong>${fmt(s.score.totalEarned)} / ${fmt(s.score.totalPossible)}</strong>${new Date(s.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span></button>`).join('');
+  const q = state.search.submissions.trim().toLowerCase();
+  const filtered = papers.filter(s => {
+    if (state.submissionFilter === 'review' && !s.needsReview) return false;
+    if (state.submissionFilter === 'confirmed' && !s.confirmed) return false;
+    if (state.submissionFilter === 'draft' && (s.confirmed || s.needsReview)) return false;
+    if (q && !`${s.studentName || ''} ${s.seatNumber} ${s.examCode}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const selecting = state.selectMode.submissions, sel = state.selected.submissions;
+  const rows = filtered.map(s => {
+    const checked = sel.has(s.id);
+    const actionAttr = selecting ? `data-action="toggle-select-item" data-scope="submissions" data-id="${esc(s.id)}"` : `data-action="open-submission" data-id="${esc(s.id)}"`;
+    return `<button class="card submission-row ${checked ? 'row-selected' : ''}" ${actionAttr}>${selecting ? `<input type="checkbox" class="row-check" tabindex="-1" ${checked ? 'checked' : ''} aria-label="Chọn SBD ${esc(s.seatNumber)}">` : `<span class="avatar-number">${esc(s.seatNumber === '????????' ? '?' : s.seatNumber.slice(-3))}</span>`}<span class="card-copy"><strong>${esc(s.studentName || 'Chưa ghép tên')} · SBD ${esc(s.seatNumber)}</strong><p>${statusPill(s)} ${s.examCode === exam?.code ? '' : `<span class="pill red">Mã ${esc(s.examCode)} ≠ ${esc(exam?.code)}</span>`}</p></span><span class="card-end"><strong>${fmt(s.score.totalEarned)} / ${fmt(s.score.totalPossible)}</strong>${new Date(s.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span></button>`;
+  }).join('');
 
   return `
     <div class="breadcrumb"><button data-action="navigate" data-view="batches">Đợt chấm</button><span>/</span><span>${esc(batch.className)}</span></div>
@@ -331,12 +407,29 @@ function batchDetailPage({ batches, exams, submissions, roster }) {
     <div class="toolbar">
       <div><h1>Lớp ${esc(batch.className)}</h1><p class="lede">${papers.length} / 100 bài đã lưu${rosterClass.length ? ` · ${rosterClass.length} học sinh trong danh sách` : ''}</p></div>
       <div class="actions" style="margin:0">
+        <button class="button secondary sm" data-action="edit-batch" data-id="${esc(batch.id)}">Sửa đợt</button>
+        <button class="button danger sm" data-action="delete-batch" data-id="${esc(batch.id)}">Xóa đợt</button>
+        ${papers.length ? `<button class="button secondary sm" data-action="toggle-select-mode" data-scope="submissions">${selecting ? 'Xong' : 'Chọn'}</button>` : ''}
         <button class="button secondary" data-action="export-csv" data-id="${esc(batch.id)}" ${papers.length ? '' : 'disabled'}>${icon('download')}Xuất CSV</button>
         <button class="button" data-action="new-submission" data-id="${esc(batch.id)}" ${papers.length >= 100 ? 'disabled' : ''}>${icon('scan')}Quét phiếu</button>
       </div>
     </div>
     ${!examComplete(exam) ? `<div class="notice warning"><span aria-hidden="true">!</span><div><strong>Đáp án chưa đủ theo số câu trong đề</strong><p>Kiểm tra khóa đáp án trước khi dùng để chấm.</p><button class="button quiet sm" style="margin-top:8px" data-action="edit-exam" data-id="${esc(exam?.id)}">Mở đáp án</button></div></div>` : ''}
-    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>Quét phiếu để hiện điểm nháp. Kiểm tra các ô bị đánh dấu trước khi chốt.</p><button class="button" data-action="new-submission" data-id="${esc(batch.id)}">${icon('scan')}Quét phiếu đầu tiên</button></div>`}
+    ${papers.length ? `
+      <div class="list-controls">
+        <input type="search" class="search-input" data-search="submissions" value="${esc(state.search.submissions)}" placeholder="Tìm theo tên, SBD hoặc mã đề...">
+        <div class="filter-pills" role="group" aria-label="Lọc bài chấm">
+          ${[['all', 'Tất cả'], ['review', 'Cần rà soát'], ['confirmed', 'Đã xác nhận'], ['draft', 'Tạm tính']].map(([k, lbl]) => `<button type="button" class="filter-pill" data-action="filter-submissions" data-filter="${k}" aria-pressed="${state.submissionFilter === k}">${lbl}</button>`).join('')}
+        </div>
+      </div>
+    ` : ''}
+    ${bulkBarMarkup('submissions', filtered.map(s => s.id), `
+      <button type="button" class="button secondary sm" data-action="bulk-regrade-submissions" ${sel.size ? '' : 'disabled'}>Chấm lại (${sel.size})</button>
+      <button type="button" class="button secondary sm" data-action="bulk-confirm-submissions" ${sel.size ? '' : 'disabled'}>Xác nhận</button>
+      <button type="button" class="button secondary sm" data-action="bulk-export-submissions" ${sel.size ? '' : 'disabled'}>Xuất CSV</button>
+      <button type="button" class="button danger sm" data-action="bulk-delete-submissions" ${sel.size ? '' : 'disabled'}>Xóa (${sel.size})</button>
+    `)}
+    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>${papers.length ? 'Không có bài nào khớp bộ lọc.' : 'Quét phiếu để hiện điểm nháp. Kiểm tra các ô bị đánh dấu trước khi chốt.'}</p>${papers.length ? '' : `<button class="button" data-action="new-submission" data-id="${esc(batch.id)}">${icon('scan')}Quét phiếu đầu tiên</button>`}</div>`}
   `;
 }
 
@@ -668,11 +761,24 @@ function disableCaptureFields(disabled) {
   root.querySelectorAll('#capture-form input:not([type="file"]), #capture-form select, #capture-form textarea, #capture-form .choice-btn').forEach(field => field.disabled = disabled);
 }
 
-async function newBatchDialog(scanAfterCreate = false) {
+async function newBatchDialog(scanAfterCreate = false, batch = null) {
   const { exams } = await localState();
   if (!exams.length) { state.view = 'exams'; await render(); notify('Tạo đề thi trước khi mở đợt chấm.'); return; }
-  const body = `<form id="batch-form" data-scan-after-create="${scanAfterCreate}"><div class="form-grid"><label class="field"><span>Tên lớp</span><input name="className" maxlength="48" required placeholder="Ví dụ: 12A1"></label><label class="field"><span>Đề thi</span><select name="examId" required>${exams.map(e => `<option value="${esc(e.id)}">${esc(e.name)} · Mã ${esc(e.code)}</option>`).join('')}</select></label></div><p class="helper" style="margin-top:10px">Mỗi lớp nhận tối đa 100 bài trong đợt này.</p></form>`;
-  showDialog('Đợt chấm mới', body, 'batch-form');
+  const body = `<form id="batch-form" data-id="${esc(batch?.id || '')}" data-scan-after-create="${scanAfterCreate}"><div class="form-grid"><label class="field"><span>Tên lớp</span><input name="className" maxlength="48" required value="${esc(batch?.className || '')}" placeholder="Ví dụ: 12A1"></label><label class="field"><span>Đề thi</span><select name="examId" required>${exams.map(e => `<option value="${esc(e.id)}" ${batch?.examId === e.id ? 'selected' : ''}>${esc(e.name)} · Mã ${esc(e.code)}</option>`).join('')}</select></label></div><p class="helper" style="margin-top:10px">Mỗi lớp nhận tối đa 100 bài trong đợt này.</p></form>`;
+  showDialog(batch ? 'Sửa đợt chấm' : 'Đợt chấm mới', body, 'batch-form');
+}
+
+function rosterItemDialog(row = null) {
+  const body = `
+    <form id="roster-item-form" data-id="${esc(row?.id || '')}">
+      <div class="form-grid">
+        <label class="field full"><span>Họ và tên</span><input name="fullName" maxlength="80" required value="${esc(row?.fullName || '')}" placeholder="Ví dụ: Nguyễn Văn An"></label>
+        <label class="field"><span>Số báo danh (8 số)</span><input name="seatNumber" inputmode="numeric" maxlength="8" pattern="[0-9]{8}" required value="${esc(row?.seatNumber || '')}" placeholder="00000049"></label>
+        <label class="field"><span>Lớp</span><input name="className" maxlength="48" required value="${esc(row?.className || '')}" placeholder="Ví dụ: 10A"></label>
+      </div>
+    </form>
+  `;
+  showDialog(row ? 'Sửa học sinh' : 'Thêm học sinh', body, 'roster-item-form');
 }
 
 function examDialog(exam) {
@@ -721,7 +827,10 @@ function examDialog(exam) {
       <div id="exam-key-inputs" class="stack">${keyInputs(key, counts)}</div>
     </form>
   `;
-  showDialog(exam ? 'Sửa đề thi' : 'Tạo đề thi', body, 'exam-form');
+  const buttons = exam
+    ? `<button class="button danger" type="button" data-action="delete-exam" data-id="${esc(exam.id)}">Xóa đề</button><button class="button secondary" type="button" data-action="duplicate-exam" data-id="${esc(exam.id)}">Nhân bản</button><button class="button secondary" type="button" data-action="close-dialog">Hủy</button><button class="button" type="submit" form="exam-form">Lưu</button>`
+    : undefined;
+  showDialog(exam ? 'Sửa đề thi' : 'Tạo đề thi', body, 'exam-form', buttons);
 }
 
 function captureDialog(batch, data) {
@@ -947,7 +1056,7 @@ function applyViewerTransform() {
 
 async function handleSubmit(event) {
   const form = event.target; if (!(form instanceof HTMLFormElement)) return;
-  if (!['batch-form', 'exam-form', 'capture-form', 'review-form', 'roster-form'].includes(form.id)) return;
+  if (!['batch-form', 'exam-form', 'capture-form', 'review-form', 'roster-form', 'roster-item-form'].includes(form.id)) return;
   event.preventDefault();
   try {
     const f = new FormData(form);
@@ -955,9 +1064,22 @@ async function handleSubmit(event) {
       const className = String(f.get('className')).trim(), examId = String(f.get('examId'));
       if (!className || !examId) throw new Error('Nhập lớp và chọn đề thi.');
       const exam = (await all('exams')).find(x => x.id === examId); if (!exam) throw new Error('Đề thi không còn tồn tại.');
-      const batch = { id: crypto.randomUUID(), className, examId, examName: exam.name, createdAt: Date.now() };
-      await save('batches', batch); closeDialog(); state.batchId = batch.id; state.view = 'batch-detail'; await render();
-      if (form.dataset.scanAfterCreate === 'true') captureDialog(batch, await localState()); else notify('Đã tạo đợt chấm.');
+      const existingId = form.dataset.id;
+      if (existingId) {
+        const existing = (await all('batches')).find(x => x.id === existingId);
+        if (!existing) throw new Error('Đợt chấm không còn tồn tại.');
+        const updatedBatch = { ...existing, className, examId, examName: exam.name };
+        await save('batches', updatedBatch);
+        if (existing.className !== className) {
+          const subs = (await all('submissions')).filter(s => s.batchId === existingId).map(s => ({ ...s, className }));
+          if (subs.length) await saveMany('submissions', subs);
+        }
+        closeDialog(); await render(); notify('Đã cập nhật đợt chấm.');
+      } else {
+        const batch = { id: crypto.randomUUID(), className, examId, examName: exam.name, createdAt: Date.now() };
+        await save('batches', batch); closeDialog(); state.batchId = batch.id; state.view = 'batch-detail'; await render();
+        if (form.dataset.scanAfterCreate === 'true') captureDialog(batch, await localState()); else notify('Đã tạo đợt chấm.');
+      }
     }
     if (form.id === 'exam-form') {
       const key = keyFromForm(form), name = String(f.get('name')).trim(), existingExams = await all('exams'), existing = existingExams.find(x => x.id === form.dataset.id);
@@ -1105,6 +1227,16 @@ async function handleSubmit(event) {
       for (const item of rows) { const key = `${item.className}\u0000${item.seatNumber}`; if (seen.has(key)) { duplicates++; continue; } seen.add(key); fresh.push(item); }
       for (const item of fresh) await save('roster', item); closeDialog(); state.importDraft = null; state.view = 'roster'; await render(); notify(`Đã thêm ${fresh.length} học sinh${duplicates ? `; bỏ qua ${duplicates} SBD trùng` : ''}.`);
     }
+    if (form.id === 'roster-item-form') {
+      const fullName = String(f.get('fullName') || '').trim(), seatNumber = String(f.get('seatNumber') || '').trim(), className = String(f.get('className') || '').trim();
+      if (!fullName || !className) throw new Error('Nhập đầy đủ họ tên và lớp.');
+      if (!/^\d{8}$/.test(seatNumber)) throw new Error('SBD phải gồm đúng 8 chữ số.');
+      const id = form.dataset.id || crypto.randomUUID();
+      const old = await all('roster');
+      if (old.some(x => x.id !== id && x.className === className && x.seatNumber === seatNumber)) throw new Error(`SBD ${seatNumber} đã tồn tại trong lớp ${className}.`);
+      await save('roster', { id, fullName, seatNumber, className });
+      closeDialog(); state.view = 'roster'; await render(); notify(form.dataset.id ? 'Đã cập nhật học sinh.' : 'Đã thêm học sinh.');
+    }
   } catch (error) {
     const message = error.message || 'Không lưu được.', feedback = root.querySelector('#dialog-feedback');
     if (feedback) { feedback.textContent = message; feedback.hidden = false; feedback.scrollIntoView({ block: 'nearest' }); }
@@ -1215,6 +1347,149 @@ async function handleClick(event) {
     if (action === 'export-csv') {
       const batch = (await all('batches')).find(x => x.id === target.dataset.id), rows = (await all('submissions')).filter(x => x.batchId === target.dataset.id); if (!batch || !rows.length) throw new Error('Chưa có bài để xuất.');
       download(scoreCSV(rows), `QM-${batch.className.replace(/[^\p{L}\p{N}-]+/gu, '-')}-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8'); notify('Đã xuất CSV để mở bằng Excel.');
+    }
+    if (action === 'toggle-select-mode') {
+      const scope = target.dataset.scope; if (!scope) return;
+      state.selectMode[scope] = !state.selectMode[scope];
+      if (!state.selectMode[scope]) state.selected[scope].clear();
+      await render(); return;
+    }
+    if (action === 'toggle-select-item') {
+      const scope = target.dataset.scope, id = target.dataset.id; if (!scope || !id) return;
+      if (state.selected[scope].has(id)) state.selected[scope].delete(id); else state.selected[scope].add(id);
+      await render(); return;
+    }
+    if (action === 'select-all') {
+      const scope = target.dataset.scope, ids = (target.dataset.ids || '').split(',').filter(Boolean);
+      if (scope) { ids.forEach(id => state.selected[scope].add(id)); await render(); }
+      return;
+    }
+    if (action === 'deselect-all') {
+      const scope = target.dataset.scope;
+      if (scope) { state.selected[scope].clear(); await render(); }
+      return;
+    }
+    if (action === 'filter-submissions') {
+      state.submissionFilter = target.dataset.filter || 'all';
+      await render(); return;
+    }
+    if (action === 'delete-exam') {
+      const exam = (await all('exams')).find(x => x.id === target.dataset.id); if (!exam) return;
+      if (!confirm(`Xóa đề "${exam.name}" (Mã ${exam.code})?`)) return;
+      await remove('exams', exam.id); state.selected.exams.delete(exam.id);
+      closeDialog(); await render(); notify('Đã xóa đề thi.'); return;
+    }
+    if (action === 'duplicate-exam') {
+      const exams = await all('exams'), exam = exams.find(x => x.id === target.dataset.id); if (!exam) return;
+      let candidate = String((Number(exam.code) + 1) % 10000).padStart(4, '0');
+      const used = new Set(exams.map(x => x.code));
+      while (used.has(candidate)) candidate = String((Number(candidate) + 1) % 10000).padStart(4, '0');
+      const inputCode = prompt('Nhập mã đề 4 số cho bản sao:', candidate);
+      if (inputCode === null) return;
+      const newCode = inputCode.trim();
+      if (!/^\d{4}$/.test(newCode)) throw new Error('Mã đề phải gồm đúng 4 chữ số.');
+      if (used.has(newCode)) throw new Error(`Mã đề ${newCode} đã tồn tại.`);
+      const now = Date.now(), baseName = exam.name.replace(/\s·\s\d{4}$/, '');
+      const copy = { ...structuredClone(exam), id: crypto.randomUUID(), name: `${baseName} · ${newCode}`, code: newCode, createdAt: now, updatedAt: now };
+      await save('exams', copy); closeDialog(); await render(); examDialog(copy); notify(`Đã nhân bản thành mã ${newCode}.`); return;
+    }
+    if (action === 'bulk-delete-exams') {
+      const ids = [...state.selected.exams]; if (!ids.length) return;
+      if (!confirm(`Xóa ${ids.length} đề thi đã chọn?`)) return;
+      for (const id of ids) await remove('exams', id);
+      state.selected.exams.clear(); state.selectMode.exams = false;
+      await render(); notify(`Đã xóa ${ids.length} đề thi.`); return;
+    }
+    if (action === 'edit-batch') {
+      const batch = (await all('batches')).find(x => x.id === target.dataset.id);
+      if (!batch) throw new Error('Không tìm thấy đợt chấm.');
+      await newBatchDialog(false, batch); return;
+    }
+    if (action === 'delete-batch') {
+      const batch = (await all('batches')).find(x => x.id === target.dataset.id); if (!batch) return;
+      const subCount = (await all('submissions')).filter(x => x.batchId === batch.id).length;
+      if (!confirm(`Xóa đợt "${batch.className}"${subCount ? ` và toàn bộ ${subCount} bài chấm bên trong` : ''}?`)) return;
+      await deleteBatchesCascade([batch.id]); state.selected.batches.delete(batch.id);
+      if (state.batchId === batch.id) { state.batchId = null; state.view = 'batch'; }
+      await render(); notify('Đã xóa đợt chấm.'); return;
+    }
+    if (action === 'bulk-delete-batches') {
+      const ids = [...state.selected.batches]; if (!ids.length) return;
+      if (!confirm(`Xóa ${ids.length} đợt chấm đã chọn và toàn bộ bài chấm bên trong?`)) return;
+      await deleteBatchesCascade(ids);
+      state.selected.batches.clear(); state.selectMode.batches = false;
+      await render(); notify(`Đã xóa ${ids.length} đợt chấm.`); return;
+    }
+    if (action === 'bulk-export-batches') {
+      const ids = new Set(state.selected.batches), rows = (await all('submissions')).filter(x => ids.has(x.batchId));
+      if (!rows.length) throw new Error('Các đợt đã chọn chưa có bài nào để xuất.');
+      download(scoreCSV(rows), `QM-nhieu-dot-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
+      notify(`Đã xuất ${rows.length} bài từ ${ids.size} đợt chấm.`); return;
+    }
+    if (action === 'bulk-regrade-submissions') {
+      const ids = [...state.selected.submissions]; if (!ids.length) return;
+      const data = await localState(), updated = [];
+      for (const id of ids) {
+        const sub = data.submissions.find(x => x.id === id); if (!sub) continue;
+        const targetExam = data.exams.find(x => x.code === sub.examCode) || data.exams.find(x => x.id === sub.examId);
+        const ans = { ...sub.answers, reviewItems: [...(sub.answers?.reviewItems || [])] };
+        if (targetExam) addBlankWarnings(ans, targetExam.answerKey);
+        const next = regradeSubmission(sub, data.exams, data.roster, sub.seatNumber, sub.examCode, ans);
+        next.regradePending = false; updated.push(next);
+      }
+      await saveMany('submissions', updated);
+      state.selected.submissions.clear(); state.selectMode.submissions = false;
+      await render(); notify(`Đã chấm lại ${updated.length} bài.`); return;
+    }
+    if (action === 'bulk-confirm-submissions') {
+      const ids = [...state.selected.submissions]; if (!ids.length) return;
+      const subs = await all('submissions'), updated = subs.filter(x => ids.includes(x.id)).map(x => ({ ...x, confirmed: true, reviewed: true, needsReview: false }));
+      await saveMany('submissions', updated);
+      state.selected.submissions.clear(); state.selectMode.submissions = false;
+      await render(); notify(`Đã chốt điểm ${updated.length} bài.`); return;
+    }
+    if (action === 'bulk-export-submissions') {
+      const ids = new Set(state.selected.submissions), rows = (await all('submissions')).filter(x => ids.has(x.id));
+      if (!rows.length) throw new Error('Chưa chọn bài nào để xuất.');
+      download(scoreCSV(rows), `QM-bai-cham-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
+      notify(`Đã xuất ${rows.length} bài.`); return;
+    }
+    if (action === 'bulk-delete-submissions') {
+      const ids = [...state.selected.submissions]; if (!ids.length) return;
+      if (!confirm(`Xóa ${ids.length} bài chấm đã chọn và ảnh gốc?`)) return;
+      await deleteSubmissionsCascade(ids);
+      state.selected.submissions.clear(); state.selectMode.submissions = false;
+      await render(); notify(`Đã xóa ${ids.length} bài chấm.`); return;
+    }
+    if (action === 'add-roster-item') { rosterItemDialog(null); return; }
+    if (action === 'edit-roster-item') {
+      const row = (await all('roster')).find(x => x.id === target.dataset.id);
+      if (!row) throw new Error('Không tìm thấy học sinh.');
+      rosterItemDialog(row); return;
+    }
+    if (action === 'delete-roster-class') {
+      const cls = target.dataset.class; if (!cls) return;
+      const rows = (await all('roster')).filter(x => x.className === cls);
+      if (!confirm(`Xóa toàn bộ lớp "${cls}" (${rows.length} học sinh)?`)) return;
+      for (const r of rows) { await remove('roster', r.id); state.selected.roster.delete(r.id); }
+      await render(); notify(`Đã xóa lớp ${cls}.`); return;
+    }
+    if (action === 'bulk-move-roster') {
+      const ids = new Set(state.selected.roster); if (!ids.size) return;
+      const newClass = prompt(`Chuyển ${ids.size} học sinh đã chọn sang lớp nào?`);
+      if (newClass === null) return;
+      const trimmed = newClass.trim(); if (!trimmed) throw new Error('Tên lớp không được để trống.');
+      const rows = (await all('roster')).filter(x => ids.has(x.id)).map(x => ({ ...x, className: trimmed }));
+      await saveMany('roster', rows);
+      state.selected.roster.clear(); state.selectMode.roster = false;
+      await render(); notify(`Đã chuyển ${rows.length} học sinh sang lớp ${trimmed}.`); return;
+    }
+    if (action === 'bulk-delete-roster') {
+      const ids = [...state.selected.roster]; if (!ids.length) return;
+      if (!confirm(`Xóa ${ids.length} học sinh đã chọn khỏi danh sách?`)) return;
+      for (const id of ids) await remove('roster', id);
+      state.selected.roster.clear(); state.selectMode.roster = false;
+      await render(); notify(`Đã xóa ${ids.length} học sinh.`); return;
     }
   } catch (error) { notify(error.message || 'Thao tác chưa hoàn tất.'); }
 }
@@ -1351,6 +1626,14 @@ async function handlePdf(input) {
 
 async function handleInput(event) {
   const input = event.target;
+  if (input.matches('.search-input[data-search]')) {
+    const scope = input.dataset.search, pos = input.selectionStart ?? input.value.length;
+    state.search[scope] = input.value;
+    await render();
+    const nextInput = root.querySelector(`.search-input[data-search="${CSS.escape(scope)}"]`);
+    if (nextInput) { nextInput.focus({ preventScroll: true }); nextInput.setSelectionRange(pos, pos); }
+    return;
+  }
   if (input.matches('.numeric-input[data-key]')) {
     const keyVal = input.dataset.key, val = input.value.trim();
     input.classList.remove('is-correct', 'is-wrong');
