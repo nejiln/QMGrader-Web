@@ -311,7 +311,7 @@ summary:focus-visible {
 main {
   width: min(100% - 32px, 1120px);
   margin: 0 auto;
-  padding: 24px 0 40px;
+  padding: 28px 0 56px;
   flex: 1;
 }
 
@@ -537,8 +537,8 @@ h3 {
 .stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin: 20px 0;
+  gap: 16px;
+  margin: 24px 0 28px;
 }
 
 .stat {
@@ -569,7 +569,7 @@ h3 {
   align-items: flex-end;
   justify-content: space-between;
   gap: 14px;
-  margin: 24px 0 12px;
+  margin: 28px 0 14px;
 }
 
 .section-heading p {
@@ -580,7 +580,7 @@ h3 {
 
 .stack {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 /* Cards & List Rows */
@@ -776,9 +776,9 @@ h3 {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 28px 20px;
-  margin: 16px 0;
+  gap: 12px;
+  padding: 32px 24px;
+  margin: 20px 0 24px;
   border: 2px dashed var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -824,8 +824,8 @@ h3 {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin: 8px 0 18px;
+  gap: 14px;
+  margin: 12px 0 22px;
 }
 
 .toolbar .lede {
@@ -836,7 +836,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
   color: var(--muted);
   font-size: 13px;
 }
@@ -978,8 +978,8 @@ input[type="file"]::file-selector-button:hover {
 .score-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin: 14px 0;
+  gap: 12px;
+  margin: 16px 0 2px;
 }
 
 .score-chip {
@@ -1141,12 +1141,29 @@ input[type="file"]::file-selector-button:hover {
 .review-editor-col {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
 }
 
+#review-form,
+#exam-form,
+#capture-form,
+#batch-form,
+#roster-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+#review-form .notice,
+#exam-form .notice,
+#capture-form .notice,
+#roster-form .notice {
+  margin: 0;
+}
+
 .result-header-card {
-  padding: 18px;
+  padding: 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -1462,14 +1479,15 @@ input[type="file"]::file-selector-button:hover {
 /* Sticky Action Bar (Bottom of Right Column) */
 .sticky-action-bar {
   position: sticky;
-  bottom: 12px;
+  bottom: 14px;
   z-index: 15;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 14px;
+  margin-top: 4px;
+  padding: 14px 18px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--bar-bg);
