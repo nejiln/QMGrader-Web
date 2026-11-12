@@ -1,4 +1,4 @@
-import { FORM, gradeSubmission, regradeSubmission, emptyAnswers, scoreCSV, scanForm, hasFormMarkers, scanSignature } from './core.mjs';
+import { FORM, PHOTO_FORM, mapProfilePoint, gradeSubmission, regradeSubmission, emptyAnswers, scoreCSV, scanForm, hasFormMarkers, scanSignature } from './core.mjs';
 import { extractAnswerKeyVariants, importRosterFile, readDocument } from './imports.mjs';
 
 const root = document.querySelector('#app'), toastBox = document.querySelector('#toast');
@@ -361,26 +361,35 @@ function warningTargetInfo(message) {
   return { target: '', type: 'other', index: -1 };
 }
 
-function buildOverlayMarks(reviewItems, activeTarget = '') {
+function buildOverlayMarks(reviewItems, activeTarget = '', scanMeta = null) {
+  const profile = scanMeta?.profile === 'photo' ? PHOTO_FORM : FORM;
+  const observed = scanMeta?.observed;
+  const poly = (x1, y1, x2, y2, isActive) => {
+    const pts = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+      .map(pt => mapProfilePoint(pt, observed, profile))
+      .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
+      .join(' ');
+    return `<polygon class="overlay-mark ${isActive ? 'active' : ''}" points="${pts}" />`;
+  };
   const marks = [];
   for (const msg of reviewItems) {
     const info = warningTargetInfo(msg);
     const isActive = activeTarget && info.target === activeTarget;
     if (info.type === 'mc' && info.index >= 0 && info.index < 40) {
       const block = Math.floor(info.index / 10), row = info.index % 10;
-      const xs = FORM.mcColumns[block], y = FORM.mcRows[row];
-      marks.push(`<rect class="overlay-mark ${isActive ? 'active' : ''}" x="${xs[0] - 8}" y="${y - 6}" width="${xs[3] - xs[0] + 16}" height="12" rx="4" />`);
+      const xs = profile.mcColumns[block], y = profile.mcRows[row];
+      marks.push(poly(xs[0] - 8, y - 6, xs[3] + 8, y + 6, isActive));
     } else if (info.type === 'tf' && info.index >= 0 && info.index < 32) {
       const q = Math.floor(info.index / 4), j = info.index % 4;
-      const xs = FORM.tfColumns[q], y = FORM.tfRows[j];
-      marks.push(`<rect class="overlay-mark ${isActive ? 'active' : ''}" x="${xs[0] - 8}" y="${y - 6}" width="${xs[1] - xs[0] + 16}" height="12" rx="4" />`);
+      const xs = profile.tfColumns[q], y = profile.tfRows[j];
+      marks.push(poly(xs[0] - 8, y - 6, xs[1] + 8, y + 6, isActive));
     } else if (info.type === 'num' && info.index >= 0 && info.index < 6) {
-      const cols = FORM.numericColumns[info.index];
-      marks.push(`<rect class="overlay-mark ${isActive ? 'active' : ''}" x="${cols[0] - 8}" y="${FORM.signRow - 8}" width="${cols[3] - cols[0] + 16}" height="${FORM.digitRows[9] - FORM.signRow + 16}" rx="6" />`);
+      const cols = profile.numericColumns[info.index];
+      marks.push(poly(cols[0] - 8, profile.signRow - 8, cols[3] + 8, profile.digitRows[9] + 8, isActive));
     } else if (info.type === 'seat') {
-      marks.push(`<rect class="overlay-mark ${isActive ? 'active' : ''}" x="${FORM.seatColumns[0] - 7}" y="${FORM.identityRows[0] - 7}" width="${FORM.seatColumns[7] - FORM.seatColumns[0] + 14}" height="${FORM.identityRows[9] - FORM.identityRows[0] + 14}" rx="6" />`);
+      marks.push(poly(profile.seatColumns[0] - 7, profile.identityRows[0] - 7, profile.seatColumns[7] + 7, profile.identityRows[9] + 7, isActive));
     } else if (info.type === 'code') {
-      marks.push(`<rect class="overlay-mark ${isActive ? 'active' : ''}" x="${FORM.codeColumns[0] - 7}" y="${FORM.identityRows[0] - 7}" width="${FORM.codeColumns[3] - FORM.codeColumns[0] + 14}" height="${FORM.identityRows[9] - FORM.identityRows[0] + 14}" rx="6" />`);
+      marks.push(poly(profile.codeColumns[0] - 7, profile.identityRows[0] - 7, profile.codeColumns[3] + 7, profile.identityRows[9] + 7, isActive));
     }
   }
   return marks.join('');
@@ -420,7 +429,7 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
             <div class="viewer-stage" id="viewer-stage" style="transform: translate(${panX}px, ${panY}px) scale(${zoom}) rotate(${rotate}deg)">
               <img class="viewer-image" src="${imgUrl}" alt="Ảnh phiếu bài làm" draggable="false">
               <svg class="omr-overlay" id="omr-overlay" viewBox="0 0 ${FORM.pageWidth} ${FORM.pageHeight}" preserveAspectRatio="none" aria-hidden="true">
-                ${state.viewer.page === 1 ? buildOverlayMarks(reviewItems, highlightKey) : ''}
+                ${state.viewer.page === 1 ? buildOverlayMarks(reviewItems, highlightKey, item.scanMeta) : ''}
               </svg>
             </div>
           ` : `<div class="viewer-empty">Không có ảnh gốc (phiếu được nhập thủ công).</div>`}
@@ -730,17 +739,21 @@ async function rasterize(bitmap, rotation, scale = FORM.scale) {
   return { gray, width, height };
 }
 
-async function scanPhoto(blob, scale = FORM.scale) {
+async function scanPhoto(blob, scale = FORM.scale, counts = state.captureDraft?.questionCounts) {
   const source = await imageSource(blob), bitmap = source.bitmap;
   let result = null;
   try {
     for (let rotation = 0; rotation < 4; rotation++) {
       const raster = await rasterize(bitmap, rotation, scale), candidate = scanForm(raster.gray, raster.width, raster.height, scale);
-      if (!candidate.answers.reviewItems.includes('Không nhận diện được phiếu hoặc mốc căn chỉnh') && !candidate.answers.reviewItems.includes('Tỷ lệ ảnh khác mẫu QM 2025')) { result = candidate; break; }
+      if (!candidate.answers.reviewItems.includes('Không nhận diện được phiếu hoặc mốc căn chỉnh') && !candidate.answers.reviewItems.includes('Tỷ lệ ảnh khác mẫu QM 2025')) {
+        candidate.rotation = rotation;
+        result = candidate;
+        break;
+      }
     }
   } finally { source.close(); }
   if (!result) result = scanForm(new Uint8Array(), 0, 0, scale);
-  filterUnusedWarnings(result.answers, state.captureDraft?.questionCounts);
+  filterUnusedWarnings(result.answers, counts);
   return result;
 }
 
@@ -936,7 +949,7 @@ async function handleSubmit(event) {
       if (roster.length > 1) answers.reviewItems.push(`SBD ${seat}: trùng trong danh sách lớp`);
       if (!roster.length) answers.reviewItems.push(`SBD ${seat}: không khớp danh sách lớp`);
       if (code !== exam.code) answers.reviewItems.push(`Mã đề ${code}: khác mã đề đã chọn (${exam.code})`);
-      const id = crypto.randomUUID(), submission = { id, batchId: batch.id, examId: exam.id, className: batch.className, seatNumber: seat || '????????', recognizedSeatNumber: draft.scanResult.seatNumber, studentName: roster.length === 1 ? roster[0].fullName : '', examCode: code || '????', recognizedExamCode: draft.scanResult.examCode, recognizedAnswers: draft.scanResult.answers, answers, score: scoreFor(exam, answers), firstPageId: draft.firstPage ? `${id}-1` : null, secondPageId: draft.secondPage ? `${id}-2` : null, needsReview: answers.reviewItems.length > 0, reviewed: false, confirmed: false, createdAt: Date.now() };
+      const id = crypto.randomUUID(), submission = { id, batchId: batch.id, examId: exam.id, className: batch.className, seatNumber: seat || '????????', recognizedSeatNumber: draft.scanResult.seatNumber, studentName: roster.length === 1 ? roster[0].fullName : '', examCode: code || '????', recognizedExamCode: draft.scanResult.examCode, recognizedAnswers: draft.scanResult.answers, scanMeta: { profile: draft.scanResult.testProfile || 'qm', observed: draft.scanResult.observed || null, rotation: draft.scanResult.rotation || 0 }, answers, score: scoreFor(exam, answers), firstPageId: draft.firstPage ? `${id}-1` : null, secondPageId: draft.secondPage ? `${id}-2` : null, needsReview: answers.reviewItems.length > 0, reviewed: false, confirmed: false, createdAt: Date.now() };
       await savePaper(submission, draft.firstPage, draft.secondPage); closeDialog(); state.batchId = batch.id; state.view = 'submission'; state.submissionId = submission.id; resetViewer(); await render(); notify('Đã lưu bài và tính điểm tạm.');
     }
     if (form.id === 'review-form') {
@@ -999,15 +1012,36 @@ async function handleSubmit(event) {
         return;
       }
 
-      const targetExam = (await all('exams')).find(x => x.code === code);
-      if (targetExam) addBlankWarnings(answers, targetExam.answerKey);
-      const updated = regradeSubmission(submission, await all('exams'), await all('roster'), seat, code, answers);
+      const exams = await all('exams'), roster = await all('roster');
+      let targetExam = exams.find(x => x.code === code) || exams.find(x => x.id === submission.examId);
+      let answersToGrade = answers, seatToGrade = seat, codeToGrade = code;
+      const { first } = await submissionPhotos(submission);
+      if (first) {
+        notify('Đang OCR lại ảnh phiếu và chấm điểm…');
+        const freshScan = await scanPhoto(first, FORM.scale, targetExam?.questionCounts);
+        if (freshScan && !freshScan.answers.reviewItems.includes('Không nhận diện được phiếu hoặc mốc căn chỉnh')) {
+          submission.recognizedSeatNumber = freshScan.seatNumber;
+          submission.recognizedExamCode = freshScan.examCode;
+          submission.recognizedAnswers = freshScan.answers;
+          submission.scanMeta = { profile: freshScan.testProfile || 'qm', observed: freshScan.observed || null, rotation: freshScan.rotation || 0 };
+          answersToGrade = freshScan.answers;
+          if (freshScan.seatNumber && !/\?/.test(freshScan.seatNumber)) seatToGrade = freshScan.seatNumber;
+          if (freshScan.examCode && !/\?/.test(freshScan.examCode)) codeToGrade = freshScan.examCode;
+          targetExam = exams.find(x => x.code === codeToGrade) || targetExam;
+        }
+      }
+      if (targetExam) addBlankWarnings(answersToGrade, targetExam.answerKey);
+      const updated = regradeSubmission(submission, exams, roster, seatToGrade, codeToGrade, answersToGrade);
+      updated.scanMeta = submission.scanMeta;
       updated.regradePending = false;
-      updated.reviewed = f.get('reviewed') === 'on';
-      updated.confirmed = f.get('confirmed') === 'on';
-      if (updated.confirmed && answers.reviewItems.length && !updated.reviewed) throw new Error('Đối chiếu các ô bị gắn cờ trước khi chốt điểm.');
-      updated.needsReview = !updated.reviewed && answers.reviewItems.length > 0;
-      updated.scorePreview = true; state.reviewPreview = updated; state.submissionId = id; await render(); notify('Đã chấm bài. Bấm Lưu nháp để ghi kết quả.');
+      updated.reviewed = false;
+      updated.confirmed = false;
+      updated.needsReview = updated.answers.reviewItems.length > 0;
+      updated.scorePreview = true;
+      state.reviewPreview = updated;
+      state.submissionId = id;
+      await render();
+      notify(first ? 'Đã OCR lại từ ảnh gốc và chấm lại điểm. Bấm Lưu nháp để ghi kết quả.' : 'Đã chấm lại bài. Bấm Lưu nháp để ghi kết quả.');
     }
     if (form.id === 'roster-form') {
       const rows = state.importDraft?.rows; if (!rows?.length) throw new Error('Tệp chưa có học sinh hợp lệ.');
@@ -1089,8 +1123,8 @@ async function handleClick(event) {
       }
       const overlay = root.querySelector('#omr-overlay');
       if (overlay) {
-        const currentSubmission = (await all('submissions')).find(s => s.id === state.submissionId);
-        if (currentSubmission) overlay.innerHTML = buildOverlayMarks(currentSubmission.answers.reviewItems || [], t);
+        const currentSubmission = state.reviewPreview?.id === state.submissionId ? state.reviewPreview : (await all('submissions')).find(s => s.id === state.submissionId);
+        if (currentSubmission) overlay.innerHTML = buildOverlayMarks(currentSubmission.answers.reviewItems || [], t, currentSubmission.scanMeta);
       }
       return;
     }

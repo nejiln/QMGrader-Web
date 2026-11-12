@@ -118,14 +118,30 @@ export function rosterRows(rows, defaultClass = '') {
   });
 }
 
-const markerMap = (point, observed, scale=FORM.scale, markers=FORM.markers) => {
-  // shortcut: bilinear markers do not correct strong perspective, upgrade to a projective homography when real-paper checks need it.
-  const [x0,y0]=markers[0],y1=markers[2][1];
-  const u=(point[0]-x0)/(markers[1][0]-x0), v=(point[1]-y0)/(y1-y0);
-  const top=[observed[0][0]+(observed[1][0]-observed[0][0])*u,observed[0][1]+(observed[1][1]-observed[0][1])*u];
-  const bottom=[observed[2][0]+(observed[3][0]-observed[2][0])*u,observed[2][1]+(observed[3][1]-observed[2][1])*u];
-  return [(top[0]+(bottom[0]-top[0])*v)*scale,(top[1]+(bottom[1]-top[1])*v)*scale];
-};
+const homographies=new WeakMap();
+function markerMap(point, observed, scale=FORM.scale, markers=FORM.markers) {
+  let h=homographies.get(observed);
+  if(!h){
+    const rows=[];
+    for(let i=0;i<4;i++){
+      const u=markers[i][0]/FORM.pageWidth,v=markers[i][1]/FORM.pageHeight,x=observed[i][0],y=observed[i][1];
+      rows.push([[u,v,1,0,0,0,-u*x,-v*x],x],[[0,0,0,u,v,1,-u*y,-v*y],y]);
+    }
+    for(let col=0;col<8;col++){
+      let pivot=col;for(let row=col+1;row<8;row++)if(Math.abs(rows[row][0][col])>Math.abs(rows[pivot][0][col]))pivot=row;
+      [rows[col],rows[pivot]]=[rows[pivot],rows[col]];const divisor=rows[col][0][col];
+      if(Math.abs(divisor)<1e-10)return [point[0]*scale,point[1]*scale];
+      for(let j=col;j<8;j++)rows[col][0][j]/=divisor;rows[col][1]/=divisor;
+      for(let row=0;row<8;row++)if(row!==col){const factor=rows[row][0][col];for(let j=col;j<8;j++)rows[row][0][j]-=factor*rows[col][0][j];rows[row][1]-=factor*rows[col][1];}
+    }
+    h=rows.map(row=>row[1]);homographies.set(observed,h);
+  }
+  const u=point[0]/FORM.pageWidth,v=point[1]/FORM.pageHeight,denominator=h[6]*u+h[7]*v+1;
+  return [(h[0]*u+h[1]*v+h[2])/denominator*scale,(h[3]*u+h[4]*v+h[5])/denominator*scale];
+}
+export function mapProfilePoint(point, observed, profile=FORM) {
+  return observed?.length===4 ? markerMap(point, observed, 1, profile.markers) : point;
+}
 
 function findMarker(pixels,width,height,center,minSize=10,scale=FORM.scale) {
   const s=scale, expectedX=center[0]*s, expectedY=center[1]*s, radius=70*s;
@@ -226,12 +242,13 @@ function scanProfile(pixels,width,height,scale,profile) {
     if(invalid){warnings.push(`III-${q+1}: dấu hoặc vị trí số chưa rõ`);continue;}
     if(selected.every(x=>x==null)){warnings.push(`III-${q+1}: bỏ trống`);continue;}
     const first=selected.findIndex(x=>x!=null);
-    if(selected.slice(first).some(x=>x==null)){warnings.push(`III-${q+1}: thiếu chữ số`);continue;}
-    let number=selected.slice(first).join('');
+    const last=selected.findLastIndex(x=>x!=null);
+    if(selected.slice(first,last+1).some(x=>x==null)){warnings.push(`III-${q+1}: thiếu chữ số`);continue;}
+    let number=selected.slice(first,last+1).join('');
     if(decimalPosition.length&&decimalPosition[0]<number.length)number=`${number.slice(0,decimalPosition[0])}.${number.slice(decimalPosition[0])}`;
     answers.numeric[q]=`${sign==='filled'?'-':''}${number}`;
   }
-  return {seatNumber,examCode,answers};
+  return {seatNumber,examCode,answers,observed};
 }
 
 export function scanForm(pixels,width,height,scale=FORM.scale) {
