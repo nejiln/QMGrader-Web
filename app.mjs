@@ -284,7 +284,7 @@ async function scanCameraFrame(video,stable={signature:'',count:0},session=camer
       if(stable.count>=2){
         draft.manual=false;
         const data=await localState(),exam=data.exams.find(x=>x.id===draft.examId);draft.examKey=exam?.answerKey||{};draft.policy=exam?policyFor(exam):{};draft.score=exam?scoreFor(exam,scan.answers):null;draft.seatNumber=scan.seatNumber;draft.examCode=scan.examCode;
-        stopCamera();captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},data);notify('Đã tự quét phiếu. Điểm tạm tính đã hiện.');return;
+        stopCamera();captureDialogContent(draft,data);notify('Đã tự quét phiếu. Điểm tạm tính đã hiện.');return;
       }
     }else{
       stable.signature='';stable.count=0;
@@ -443,7 +443,7 @@ async function handleClick(event){
     if(action==='start-camera')await startCamera();
     if(action==='stop-camera'){
       const draft=state.captureDraft;stopCamera();
-      if(draft?.scanResult){draft.cameraUsed=false;draft.cameraAccepted=true;draft.cameraStatus='Đã dừng quét. Kiểm tra điểm và cảnh báo trước khi lưu.';captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},await localState());notify('Đã dừng quét. Kiểm tra phiếu trước khi lưu.');}
+      if(draft?.scanResult){draft.cameraUsed=false;draft.cameraAccepted=true;draft.cameraStatus='Đã dừng quét. Kiểm tra điểm và cảnh báo trước khi lưu.';captureDialogContent(draft,await localState());notify('Đã dừng quét. Kiểm tra phiếu trước khi lưu.');}
     }
     if(action==='manual-entry'){
       stopCamera();
@@ -452,7 +452,7 @@ async function handleClick(event){
       const answers=emptyAnswers();answers.reviewItems=['Nhập tay: chưa lưu ảnh gốc'];
       draft.scanResult={seatNumber:draft.seatNumber,examCode:draft.examCode,answers};draft.manual=true;
       const data=await localState(),exam=data.exams.find(x=>x.id===draft.examId);draft.score=exam?scoreFor(exam,answers):null;
-      captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},data);
+      captureDialogContent(draft,data);
     }
     if(action==='close-dialog')closeDialog();
     if(action==='download-roster-template'){download('\uFEFFSBD;Họ tên;Lớp\r\n','QM-mau-danh-sach-hoc-sinh.csv','text/csv;charset=utf-8');notify('Đã tải file mẫu CSV.');}
@@ -522,8 +522,8 @@ async function handlePhoto(input){
     if(number===1){draft.scanPage=photo;draft.manual=false;}else draft.secondPage=original;
     if(draft.scanPage)draft.scanResult=await scanPhoto(draft.scanPage);
     if(draft.scanResult&&!draft.manual){const data=await localState(),exam=data.exams.find(x=>x.id===draft.examId);draft.examKey=exam?.answerKey||{};draft.policy=exam?policyFor(exam):{};if(formAnswers){draft.scanResult.answers.multipleChoice=formAnswers.multipleChoice;draft.scanResult.answers.trueFalse=formAnswers.trueFalse;draft.scanResult.answers.numeric=formAnswers.numeric;}draft.score=exam?scoreFor(exam,draft.scanResult.answers):null;if(number===1){draft.seatNumber=draft.scanResult.seatNumber||draft.seatNumber;draft.examCode=draft.scanResult.examCode||draft.examCode;}}
-    draft.uploadStatus=`Đã tải ${draft.uploadName}. ${hasRecognizedMarks(draft.scanResult)?'Kiểm tra đáp án và cảnh báo bên dưới.':'Phiếu chưa nhận dạng được; nhập hoặc sửa SBD, mã đề và đáp án.'}`;draft.uploadError=!hasRecognizedMarks(draft.scanResult);captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},await localState());notify(draft.uploadStatus);
-  }catch(error){draft.uploadStatus=`Không đọc được ${draft.uploadName||'ảnh'}: ${error.message||'chọn JPG hoặc PNG.'}`;draft.uploadError=true;captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},await localState());notify(draft.uploadStatus);}
+    draft.uploadStatus=`Đã tải ${draft.uploadName}. ${hasRecognizedMarks(draft.scanResult)?'Kiểm tra đáp án và cảnh báo bên dưới.':'Phiếu chưa nhận dạng được; nhập hoặc sửa SBD, mã đề và đáp án.'}`;draft.uploadError=!hasRecognizedMarks(draft.scanResult);captureDialogContent(draft,await localState());notify(draft.uploadStatus);
+  }catch(error){draft.uploadStatus=`Không đọc được ${draft.uploadName||'ảnh'}: ${error.message||'chọn JPG hoặc PNG.'}`;draft.uploadError=true;captureDialogContent(draft,await localState());notify(draft.uploadStatus);}
 }
 async function handlePdf(input){
   stopCamera();
@@ -535,8 +535,8 @@ async function handlePdf(input){
     draft.scanResult=draft.scanPage?await scanPhoto(draft.scanPage):null;
     const data=await localState(),exam=data.exams.find(e=>e.id===draft.examId);
     if(draft.scanResult){draft.seatNumber=draft.scanResult.seatNumber;draft.examCode=draft.scanResult.examCode;draft.examKey=exam?.answerKey||{};draft.policy=exam?policyFor(exam):{};draft.score=exam?scoreFor(exam,draft.scanResult.answers):null;}
-    draft.uploadStatus=`Đã tải ${draft.uploadName}. ${hasRecognizedMarks(draft.scanResult)?'Kiểm tra đáp án và cảnh báo bên dưới.':'Không thấy đáp án theo mẫu. Thử ảnh rõ mặt trước phiếu hoặc nhập tay.'}`;draft.uploadError=!hasRecognizedMarks(draft.scanResult);captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},data);notify(draft.uploadStatus);
-  }catch(error){draft.uploadStatus=`Không đọc được ${draft.uploadName||'PDF'}: ${error.message||'kiểm tra lại tệp.'}`;draft.uploadError=true;captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},await localState());notify(draft.uploadStatus);}
+    draft.uploadStatus=`Đã tải ${draft.uploadName}. ${hasRecognizedMarks(draft.scanResult)?'Kiểm tra đáp án và cảnh báo bên dưới.':'Không thấy đáp án theo mẫu. Thử ảnh rõ mặt trước phiếu hoặc nhập tay.'}`;draft.uploadError=!hasRecognizedMarks(draft.scanResult);captureDialogContent(draft,data);notify(draft.uploadStatus);
+  }catch(error){draft.uploadStatus=`Không đọc được ${draft.uploadName||'PDF'}: ${error.message||'kiểm tra lại tệp.'}`;draft.uploadError=true;captureDialogContent(draft,await localState());notify(draft.uploadStatus);}
 }
 
 async function handleInput(event){
