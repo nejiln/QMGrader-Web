@@ -1011,6 +1011,7 @@ async function handleSubmit(event) {
           answers.reviewItems = answers.reviewItems.filter(Boolean);
           updated.answers = answers; updated.needsReview = answers.reviewItems.length > 0;
         }
+        updated.scanMeta = state.reviewPreview?.scanMeta || submission.scanMeta || null;
         updated.score = preview ? preview.score : submission.score;
         updated.scorePreview = false; updated.regradePending = !preview;
         updated.reviewed = f.get('reviewed') === 'on';
@@ -1027,6 +1028,7 @@ async function handleSubmit(event) {
         const updated = regradeSubmission(submission, exams, roster, seat, code, answers);
         const reviewed = f.get('reviewed') === 'on';
         if (updated.answers.reviewItems.length > 0 && !reviewed) throw new Error('Vui lòng tích "Đã đối chiếu" các ô bị gắn cờ trước khi chốt điểm.');
+        updated.scanMeta = state.reviewPreview?.scanMeta || submission.scanMeta || null;
         updated.reviewed = reviewed;
         updated.confirmed = true;
         updated.needsReview = false;

@@ -766,6 +766,17 @@ h3 {
   color: var(--rose-ink);
 }
 
+select,
+select option {
+  background-color: var(--surface);
+  color: var(--ink);
+}
+
+.notice > span:first-child {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
 .notice strong {
   display: block;
   margin-bottom: 2px;
@@ -1247,6 +1258,14 @@ input[type="file"]::file-selector-button {
   font-size: 15px;
   font-weight: 650;
   font-family: "SF Mono", ui-monospace, Menlo, Monaco, monospace;
+}
+
+select.inline-meta-input {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-overflow: ellipsis;
 }
 
 .inline-meta-input:focus {
