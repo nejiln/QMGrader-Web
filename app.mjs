@@ -50,7 +50,7 @@ const icon = (name) => ({
 function setTheme(theme, persist = false) {
   const dark = theme === 'dark';
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#09090B' : '#F8FAFC');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#000000' : '#F2F2F7');
   if (persist) try { localStorage.setItem('qm-cham-theme', dark ? 'dark' : 'light'); } catch {}
   const button = root.querySelector('.theme-toggle');
   if (button) {
@@ -442,7 +442,9 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
             <div class="result-title-row">
               <div>
                 <p class="eyebrow">Lớp ${esc(item.className)}</p>
-                <h1>${item.studentName ? esc(item.studentName) : '<span class="pill warn">Chưa ghép tên</span>'}</h1>
+                ${item.studentName
+                  ? `<h1>${esc(item.studentName)}</h1>`
+                  : `<h1 class="unmatched-name">Thí sinh chưa ghép tên</h1><p class="unmatched-hint">Chưa có SBD ${esc(item.seatNumber)} trong danh sách lớp</p>`}
               </div>
               ${statusPill(item)}
             </div>
@@ -466,12 +468,15 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
             </div>
           </section>
 
-          ${item.scorePreview ? `<section class="notice warning"><span aria-hidden="true">!</span><div><strong>Đã chấm xem trước, chưa lưu</strong><p>Nhấn “Lưu nháp” hoặc “Chốt điểm & Bài tiếp theo” để ghi kết quả.</p></div></section>` : ''}
-          ${item.regradePending ? `<section class="notice warning"><span aria-hidden="true">!</span><div><strong>Thay đổi đã lưu, điểm chưa chấm lại</strong><p>Bấm “Chốt điểm & Bài tiếp theo” hoặc “Chấm lại” để cập nhật điểm theo mã đề ${esc(item.examCode)}.</p></div></section>` : ''}
+          ${item.scorePreview ? `<section class="notice"><span aria-hidden="true">i</span><div><strong>Bản xem trước · chưa lưu</strong><p>Bấm “Lưu nháp” để lưu tạm hoặc “Chốt & Tiếp” để hoàn tất.</p></div></section>` : ''}
+          ${item.regradePending ? `<section class="notice warning"><span aria-hidden="true">!</span><div><strong>Thay đổi đã lưu, điểm chưa chấm lại</strong><p>Bấm “Chấm lại” hoặc “Chốt & Tiếp” để cập nhật điểm theo mã đề ${esc(item.examCode)}.</p></div></section>` : ''}
 
           ${reviewItems.length ? `
-            <details class="warning-panel" open>
-              <summary><span>${reviewItems.length} mục cần đối chiếu (chạm để nhảy tới câu)</span><span class="pill warn">${reviewItems.length}</span></summary>
+            <details class="warning-panel" ${reviewItems.length <= 4 ? 'open' : ''}>
+              <summary>
+                <span class="warning-summary-title"><i class="warning-summary-dot" aria-hidden="true"></i>${reviewItems.length} mục cần lưu ý</span>
+                <span class="pill neutral">Chạm để đối chiếu</span>
+              </summary>
               <div class="warning-chips">
                 ${reviewItems.map(msg => {
                   const info = warningTargetInfo(msg);
@@ -492,7 +497,7 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
               <button class="button danger sm" type="button" data-action="delete-submission" data-id="${esc(item.id)}">Xóa</button>
               <button class="button secondary sm" type="submit" name="action" value="save">Lưu nháp</button>
               <button class="button secondary sm" type="submit" name="action" value="regrade">Chấm lại</button>
-              <button class="button" type="submit" name="action" value="finalize-next">${icon('mark')}Chốt điểm & Bài tiếp theo</button>
+              <button class="button sm" type="submit" name="action" value="finalize-next">${icon('mark')}Chốt & Tiếp</button>
             </div>
           </div>
         </form>
