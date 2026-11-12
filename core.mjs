@@ -218,7 +218,7 @@ function scanProfile(pixels,width,height,scale,profile) {
     warnings.push('Không nhận diện được phiếu hoặc mốc căn chỉnh');return {seatNumber,examCode,answers};
   }
   const digits=(columns,label)=>columns.map((x,col)=>{
-    const isSeat=label==='SBD',selected=selectOne(pixels,width,height,observed,profile.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale,profile,isSeat?200:150,isSeat?0.14:0.24,isSeat);
+    const selected=selectOne(pixels,width,height,observed,profile.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale,profile,200,0.14,true);
     return selected==null?'?':String(selected);
   }).join('');
   seatNumber=digits(profile.seatColumns,'SBD');examCode=digits(profile.codeColumns,'Mã đề');
