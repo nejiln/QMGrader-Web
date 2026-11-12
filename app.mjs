@@ -731,13 +731,26 @@ function captureDialog(batch, data) {
   captureDialogContent(draft, data);
 }
 
+function syncCaptureExam(draft, exams, targetExam) {
+  if (!targetExam) return;
+  draft.examId = targetExam.id;
+  draft.expectedExamCode = targetExam.code;
+  draft.questionCounts = targetExam.questionCounts || { multipleChoice: 40, trueFalse: 8, numeric: 6 };
+  draft.examKey = targetExam.answerKey || {};
+  draft.policy = policyFor(targetExam);
+  if (draft.scanResult) {
+    filterUnusedWarnings(draft.scanResult.answers, draft.questionCounts);
+    draft.score = scoreFor(targetExam, draft.scanResult.answers);
+  }
+}
+
 function captureDialogContent(draft, data) {
   const exam = data.exams.find(e => e.id === draft.examId), matches = data.roster.filter(x => x.className === draft.className && x.seatNumber === draft.seatNumber);
   const warning = matches.length > 1 ? `<div class="notice warning"><span>!</span><div><strong>SBD trùng trong ${esc(draft.className)}</strong><p>Sửa danh sách lớp trước khi ghép tên. Bài vẫn lưu để rà soát.</p></div></div>` : draft.seatNumber && matches.length === 0 ? `<div class="notice warning"><span>!</span><div><strong>Chưa có SBD này trong lớp</strong><p>Tên sẽ để trống. Có thể ghép sau trong danh sách lớp.</p></div></div>` : draft.examCode && draft.expectedExamCode && draft.examCode !== draft.expectedExamCode ? `<div class="notice warning"><span>!</span><div><strong>Mã đọc được ${esc(draft.examCode)} khác mã đề đã chọn ${esc(draft.expectedExamCode)}</strong><p>Đối chiếu mã đề trước khi lưu điểm.</p></div></div>` : '';
   const result = captureResultMarkup(draft);
   const scanner = `<div class="camera-actions"><button class="button secondary" type="button" data-action="start-camera" ${cameraStream ? 'hidden' : ''}>Quét tự động bằng camera</button><button class="button quiet" type="button" data-action="stop-camera" ${cameraStream ? '' : 'hidden'}>Dừng camera</button></div><div id="live-camera" class="live-camera" ${cameraStream ? '' : 'hidden'}><video id="scan-camera" autoplay muted playsinline aria-label="Khung quét phiếu"></video><span class="camera-frame" aria-hidden="true"></span></div><p id="camera-status" class="helper" role="status" ${cameraStream || draft.cameraStatus ? '' : 'hidden'}>${esc(draft.cameraStatus || 'Đưa đủ bốn mốc đen trang 1 vào khung, giữ yên để app tự quét.')}</p>`;
   const uploadStatus = draft.uploadStatus ? `<div class="notice ${draft.uploadError ? 'error' : ''}" role="status"><span>${draft.uploadError ? '!' : 'i'}</span><div>${esc(draft.uploadStatus)}</div></div>` : '';
-  const body = `<form id="capture-form"><input type="hidden" name="batchId" value="${esc(draft.batchId)}"><div class="form-grid"><label class="field"><span>Số báo danh · 8 số</span><input name="seatNumber" inputmode="numeric" maxlength="8" value="${esc(draft.seatNumber)}" placeholder="Đọc tự động từ phiếu"></label><label class="field"><span>Mã đề · 4 số</span><input name="examCode" inputmode="numeric" maxlength="4" value="${esc(draft.examCode)}"></label></div>${scanner}${warning}<div id="capture-result">${result}</div>${uploadStatus}<div class="capture-pair">${captureSlot(1, draft.scanPage || draft.firstPage)}</div><label class="field"><span>Nhập phiếu PDF thay vì chụp</span><input type="file" data-pdf accept="application/pdf,.pdf"><small>Đọc trang đầu trên thiết bị. PDF scan cần đúng mẫu và ảnh rõ mốc căn chỉnh.</small></label><details class="card answer-card" ${draft.scanResult ? '' : 'open'}><summary>${draft.scanResult ? 'Sửa đáp án trước khi lưu' : 'Nhập đáp án thủ công'}</summary><div class="stack" style="margin-top:12px">${answerEditor(draft.scanResult?.answers || emptyAnswers(), draft.questionCounts)}</div></details><p class="helper" style="margin-top:10px">${esc(exam?.name || '')} · ảnh phiếu lưu cục bộ trên thiết bị.</p></form>`;
+  const body = `<form id="capture-form"><input type="hidden" name="batchId" value="${esc(draft.batchId)}"><div class="form-grid"><label class="field full"><span>Đề thi</span><select name="captureExamId" data-action="select-capture-exam">${data.exams.map(e => `<option value="${esc(e.id)}" ${e.id === draft.examId ? 'selected' : ''}>${esc(e.name)} · Mã ${esc(e.code)}</option>`).join('')}</select></label><label class="field"><span>Số báo danh · 8 số</span><input name="seatNumber" inputmode="numeric" maxlength="8" value="${esc(draft.seatNumber)}" placeholder="Đọc tự động từ phiếu"></label><label class="field"><span>Mã đề · 4 số</span><input name="examCode" inputmode="numeric" maxlength="4" value="${esc(draft.examCode)}"></label></div>${scanner}${warning}<div id="capture-result">${result}</div>${uploadStatus}<div class="capture-pair">${captureSlot(1, draft.scanPage || draft.firstPage)}</div><label class="field"><span>Nhập phiếu PDF thay vì chụp</span><input type="file" data-pdf accept="application/pdf,.pdf"><small>Đọc trang đầu trên thiết bị. PDF scan cần đúng mẫu và ảnh rõ mốc căn chỉnh.</small></label><details class="card answer-card" ${draft.scanResult ? '' : 'open'}><summary>${draft.scanResult ? 'Sửa đáp án trước khi lưu' : 'Nhập đáp án thủ công'}</summary><div class="stack" style="margin-top:12px">${answerEditor(draft.scanResult?.answers || emptyAnswers(), draft.questionCounts, draft.scanResult?.answers?.reviewItems || [], exam?.answerKey)}</div></details><p class="helper" style="margin-top:10px">${esc(exam?.name || '')} · Mã ${esc(exam?.code || '')} · ảnh phiếu lưu cục bộ trên thiết bị.</p></form>`;
   const canSave = draft.scanResult && (!draft.cameraUsed || draft.cameraStable || draft.cameraAccepted), buttons = `<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${!draft.scanResult ? '<button class="button quiet" type="button" data-action="manual-entry">Nhập tay</button>' : ''}<button class="button" type="submit" form="capture-form" ${canSave ? '' : 'disabled'}>Lưu bài chấm</button>`;
   if (state.modal) { state.modal.body = body; state.modal.buttons = buttons; updateDialog(body); const foot = root.querySelector('.dialog-foot'); if (foot) foot.innerHTML = buttons; }
   else showDialog('Quét phiếu', body, 'capture-form', buttons);
@@ -840,7 +853,9 @@ async function scanCameraFrame(video, stable = { signature: '', count: 0 }, sess
       setCameraStatus(stable.count > 1 ? (mismatchCode ? 'Đã đọc phiếu. Mã đề khác đề đã chọn; kiểm tra trước khi lưu.' : 'Đã nhận phiếu ổn định. Kiểm tra các ô cảnh báo trước khi lưu.') : 'Đã đọc phiếu. Điểm tạm hiện; giữ phiếu yên.');
       if (stable.count >= 2) {
         draft.manual = false;
-        const data = await localState(), exam = data.exams.find(x => x.id === draft.examId); draft.examKey = exam?.answerKey || {}; draft.policy = exam ? policyFor(exam) : {}; draft.score = exam ? scoreFor(exam, scan.answers) : null; draft.seatNumber = scan.seatNumber; draft.examCode = scan.examCode;
+        const data = await localState(), exam = data.exams.find(x => x.code === scan.examCode) || data.exams.find(x => x.id === draft.examId);
+        draft.seatNumber = scan.seatNumber; draft.examCode = scan.examCode;
+        syncCaptureExam(draft, data.exams, exam);
         stopCamera(); captureDialogContent(draft, data); notify('Đã tự quét phiếu. Điểm tạm tính đã hiện.'); return;
       }
     } else {
@@ -1239,6 +1254,15 @@ function download(text, name, type) {
 
 async function handleChange(event) {
   const input = event.target;
+  if (input.matches('[data-action="select-capture-exam"]') && state.captureDraft) {
+    const data = await localState(), exam = data.exams.find(x => x.id === input.value);
+    if (exam) {
+      state.captureDraft.examCode = exam.code;
+      syncCaptureExam(state.captureDraft, data.exams, exam);
+      captureDialogContent(state.captureDraft, data);
+    }
+    return;
+  }
   if (input.matches('[data-action="select-submission-exam"]')) {
     const exam = (await all('exams')).find(x => x.id === input.value);
     if (exam && input.form?.elements.examCode) {
@@ -1287,11 +1311,11 @@ async function handlePhoto(input) {
     if (number === 1) { draft.scanPage = photo; draft.manual = false; } else draft.secondPage = original;
     if (draft.scanPage) draft.scanResult = await scanPhoto(draft.scanPage);
     if (draft.scanResult && !draft.manual) {
-      const data = await localState(), exam = data.exams.find(x => x.id === draft.examId);
-      draft.examKey = exam?.answerKey || {}; draft.policy = exam ? policyFor(exam) : {};
-      if (formAnswers) { draft.scanResult.answers.multipleChoice = formAnswers.multipleChoice; draft.scanResult.answers.trueFalse = formAnswers.trueFalse; draft.scanResult.answers.numeric = formAnswers.numeric; }
-      draft.score = exam ? scoreFor(exam, draft.scanResult.answers) : null;
+      const data = await localState();
       if (number === 1) { draft.seatNumber = draft.scanResult.seatNumber || draft.seatNumber; draft.examCode = draft.scanResult.examCode || draft.examCode; }
+      const exam = data.exams.find(x => x.code === draft.examCode) || data.exams.find(x => x.id === draft.examId);
+      if (formAnswers) { draft.scanResult.answers.multipleChoice = formAnswers.multipleChoice; draft.scanResult.answers.trueFalse = formAnswers.trueFalse; draft.scanResult.answers.numeric = formAnswers.numeric; }
+      syncCaptureExam(draft, data.exams, exam);
     }
     draft.uploadStatus = `Đã tải ${draft.uploadName}. ${hasRecognizedMarks(draft.scanResult) ? 'Kiểm tra đáp án và cảnh báo bên dưới.' : 'Phiếu chưa nhận dạng được; nhập hoặc sửa SBD, mã đề và đáp án.'}`;
     draft.uploadError = !hasRecognizedMarks(draft.scanResult);
@@ -1311,8 +1335,12 @@ async function handlePdf(input) {
     const { renderPdfPages } = await import('./imports.mjs'), pages = await renderPdfPages(input.files[0]);
     draft.firstPage = pages[0] || null; draft.scanPage = draft.firstPage; draft.secondPage = null;
     draft.scanResult = draft.scanPage ? await scanPhoto(draft.scanPage) : null;
-    const data = await localState(), exam = data.exams.find(e => e.id === draft.examId);
-    if (draft.scanResult) { draft.seatNumber = draft.scanResult.seatNumber; draft.examCode = draft.scanResult.examCode; draft.examKey = exam?.answerKey || {}; draft.policy = exam ? policyFor(exam) : {}; draft.score = exam ? scoreFor(exam, draft.scanResult.answers) : null; }
+    const data = await localState();
+    if (draft.scanResult) {
+      draft.seatNumber = draft.scanResult.seatNumber; draft.examCode = draft.scanResult.examCode;
+      const exam = data.exams.find(e => e.code === draft.examCode) || data.exams.find(e => e.id === draft.examId);
+      syncCaptureExam(draft, data.exams, exam);
+    }
     draft.uploadStatus = `Đã tải ${draft.uploadName}. ${hasRecognizedMarks(draft.scanResult) ? 'Kiểm tra đáp án và cảnh báo bên dưới.' : 'Không thấy đáp án theo mẫu. Thử ảnh rõ mặt trước phiếu hoặc nhập tay.'}`;
     draft.uploadError = !hasRecognizedMarks(draft.scanResult); captureDialogContent(draft, data); notify(draft.uploadStatus);
   } catch (error) {
