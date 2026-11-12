@@ -108,10 +108,10 @@ assert.equal(photoScan.seatNumber,seat);
 assert.equal(photoScan.examCode,code);
 assert.ok(photoScan.answers.multipleChoice.every((value,index)=>value==='ABCD'[index%4]));
 
-const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14','qm-cham-qmgrader-web-v15'];
+const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14','qm-cham-qmgrader-web-v15','qm-cham-qmgrader-web-v16'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
-assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14'].sort());
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14','qm-cham-qmgrader-web-v15'].sort());
 
 for(const [system,saved,expected] of [['dark',null,'dark'],['light',null,'light'],['dark','light','light']]){
   const document={documentElement:{dataset:{}},querySelector:()=>({setAttribute(name,value){this[name]=value;}})};
