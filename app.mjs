@@ -751,9 +751,11 @@ function stopCamera() {
   disableCaptureFields(false);
   const video = root.querySelector('#scan-camera'); if (video) { video.pause(); video.srcObject = null; }
   const live = root.querySelector('#live-camera'); if (live) live.hidden = true;
-  const start = root.querySelector('[data-action="start-camera"]'), stop = root.querySelector('[data-action="stop-camera"]');
+  const start = root.querySelector('[data-action="start-camera"]'), snap = root.querySelector('[data-action="snap-camera"]'), stop = root.querySelector('[data-action="stop-camera"]');
   if (start) { start.hidden = false; start.disabled = false; }
+  if (snap) snap.hidden = true;
   if (stop) stop.hidden = true;
+  root.querySelector('.camera-frame')?.classList.remove('is-detecting', 'is-locked');
   setCameraStatus(state.captureDraft?.cameraStable ? 'Đã quét ổn định. Điểm tạm tính đã hiện.' : 'Đã dừng camera. Quét lại để xác nhận.');
 }
 
@@ -857,10 +859,10 @@ function captureDialogContent(draft, data) {
   const exam = data.exams.find(e => e.id === draft.examId), matches = data.roster.filter(x => x.className === draft.className && x.seatNumber === draft.seatNumber);
   const warning = matches.length > 1 ? `<div class="notice warning"><span>!</span><div><strong>SBD trùng trong ${esc(draft.className)}</strong><p>Sửa danh sách lớp trước khi ghép tên. Bài vẫn lưu để rà soát.</p></div></div>` : draft.seatNumber && matches.length === 0 ? `<div class="notice warning"><span>!</span><div><strong>Chưa có SBD này trong lớp</strong><p>Tên sẽ để trống. Có thể ghép sau trong danh sách lớp.</p></div></div>` : draft.examCode && draft.expectedExamCode && draft.examCode !== draft.expectedExamCode ? `<div class="notice warning"><span>!</span><div><strong>Mã đọc được ${esc(draft.examCode)} khác mã đề đã chọn ${esc(draft.expectedExamCode)}</strong><p>Đối chiếu mã đề trước khi lưu điểm.</p></div></div>` : '';
   const result = captureResultMarkup(draft);
-  const scanner = `<div class="camera-actions"><button class="button secondary" type="button" data-action="start-camera" ${cameraStream ? 'hidden' : ''}>Quét tự động bằng camera</button><button class="button quiet" type="button" data-action="stop-camera" ${cameraStream ? '' : 'hidden'}>Dừng camera</button></div><div id="live-camera" class="live-camera" ${cameraStream ? '' : 'hidden'}><video id="scan-camera" autoplay muted playsinline aria-label="Khung quét phiếu"></video><span class="camera-frame" aria-hidden="true"></span></div><p id="camera-status" class="helper" role="status" ${cameraStream || draft.cameraStatus ? '' : 'hidden'}>${esc(draft.cameraStatus || 'Đưa đủ bốn mốc đen trang 1 vào khung, giữ yên để app tự quét.')}</p>`;
+  const scanner = `<div class="camera-actions"><button class="button secondary" type="button" data-action="start-camera" ${cameraStream ? 'hidden' : ''}>Quét tự động bằng camera</button><button class="button" type="button" data-action="snap-camera" ${cameraStream ? '' : 'hidden'}>Chụp & quét ngay</button><button class="button quiet" type="button" data-action="stop-camera" ${cameraStream ? '' : 'hidden'}>Dừng camera</button></div><div id="live-camera" class="live-camera" ${cameraStream ? '' : 'hidden'}><video id="scan-camera" autoplay muted playsinline aria-label="Khung quét phiếu"></video><span class="camera-frame" aria-hidden="true"></span></div><p id="camera-status" class="helper" role="status" ${cameraStream || draft.cameraStatus ? '' : 'hidden'}>${esc(draft.cameraStatus || 'Đưa đủ bốn mốc đen trang 1 vào khung, giữ yên để app tự quét.')}</p>`;
   const uploadStatus = draft.uploadStatus ? `<div class="notice ${draft.uploadError ? 'error' : ''}" role="status"><span>${draft.uploadError ? '!' : 'i'}</span><div>${esc(draft.uploadStatus)}</div></div>` : '';
   const body = `<form id="capture-form"><input type="hidden" name="batchId" value="${esc(draft.batchId)}"><div class="form-grid"><label class="field full"><span>Đề thi</span><select name="captureExamId" data-action="select-capture-exam">${data.exams.map(e => `<option value="${esc(e.id)}" ${e.id === draft.examId ? 'selected' : ''}>${esc(e.name)} · Mã ${esc(e.code)}</option>`).join('')}</select></label><label class="field"><span>Số báo danh · 8 số</span><input name="seatNumber" inputmode="numeric" maxlength="8" value="${esc(draft.seatNumber)}" placeholder="Đọc tự động từ phiếu"></label><label class="field"><span>Mã đề · 4 số</span><input name="examCode" inputmode="numeric" maxlength="4" value="${esc(draft.examCode)}"></label></div>${scanner}${warning}<div id="capture-result">${result}</div>${uploadStatus}<div class="capture-pair">${captureSlot(1, draft.scanPage || draft.firstPage)}</div><label class="field"><span>Nhập phiếu PDF thay vì chụp</span><input type="file" data-pdf accept="application/pdf,.pdf"><small>Đọc trang đầu trên thiết bị. PDF scan cần đúng mẫu và ảnh rõ mốc căn chỉnh.</small></label><details class="card answer-card" ${draft.scanResult ? '' : 'open'}><summary>${draft.scanResult ? 'Sửa đáp án trước khi lưu' : 'Nhập đáp án thủ công'}</summary><div class="stack" style="margin-top:12px">${answerEditor(draft.scanResult?.answers || emptyAnswers(), draft.questionCounts, draft.scanResult?.answers?.reviewItems || [], exam?.answerKey)}</div></details><p class="helper" style="margin-top:10px">${esc(exam?.name || '')} · Mã ${esc(exam?.code || '')} · ảnh phiếu lưu cục bộ trên thiết bị.</p></form>`;
-  const canSave = draft.scanResult && (!draft.cameraUsed || draft.cameraStable || draft.cameraAccepted), buttons = `<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${!draft.scanResult ? '<button class="button quiet" type="button" data-action="manual-entry">Nhập tay</button>' : ''}<button class="button" type="submit" form="capture-form" ${canSave ? '' : 'disabled'}>Lưu bài chấm</button>`;
+  const canSave = draft.scanResult && (!draft.cameraUsed || draft.cameraStable || draft.cameraAccepted), buttons = `<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${!draft.scanResult ? '<button class="button quiet" type="button" data-action="manual-entry">Nhập tay</button>' : ''}<button class="button secondary" type="submit" form="capture-form" value="save-and-next" ${canSave ? '' : 'disabled'}>Lưu & Quét tiếp</button><button class="button" type="submit" form="capture-form" value="save" ${canSave ? '' : 'disabled'}>Lưu bài chấm</button>`;
   if (state.modal) { state.modal.body = body; state.modal.buttons = buttons; updateDialog(body); const foot = root.querySelector('.dialog-foot'); if (foot) foot.innerHTML = buttons; }
   else showDialog('Quét phiếu', body, 'capture-form', buttons);
 }
@@ -917,66 +919,90 @@ async function scanPhoto(blob, scale = FORM.scale, counts = state.captureDraft?.
   return result;
 }
 
-function cameraFrame(video) {
-  if (!video.videoWidth || !video.videoHeight) return Promise.resolve(null);
+function captureVideoCanvas(video) {
+  if (!video.videoWidth || !video.videoHeight) return null;
   const ratio = FORM.pageWidth / FORM.pageHeight, sourceRatio = video.videoWidth / video.videoHeight;
   const width = Math.round(sourceRatio > ratio ? video.videoHeight * ratio : video.videoWidth), height = Math.round(sourceRatio > ratio ? video.videoHeight : video.videoWidth / ratio), x = Math.round((video.videoWidth - width) / 2), y = Math.round((video.videoHeight - height) / 2), canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height; canvas.getContext('2d', { alpha: false }).drawImage(video, x, y, width, height, 0, 0, width, height);
-  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+  return canvas;
 }
 
-async function scanCameraFrame(video, stable = { signature: '', count: 0 }, session = cameraSession) {
+function canvasToBlob(canvas) {
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+}
+
+async function scanCameraFrame(video, stable = { signature: '', count: 0, consecutive: 0, seatNumber: '', examCode: '' }, session = cameraSession) {
   if (!cameraStream || session !== cameraSession) return;
-  if (cameraBusy || video.readyState < 2) { cameraTimer = setTimeout(() => scanCameraFrame(video, stable, session), 350); return; }
+  if (cameraBusy || video.readyState < 2) { cameraTimer = setTimeout(() => scanCameraFrame(video, stable, session), 200); return; }
   cameraBusy = true;
+  let foundScan = false;
   try {
-    const photo = await cameraFrame(video); if (!photo) throw new Error('Đang mở camera.');
-    const bitmap = await createImageBitmap(photo);
+    const canvas = captureVideoCanvas(video); if (!canvas) throw new Error('Đang mở camera.');
     let scan = null, mismatchCode = '';
-    try {
-      for (const rotation of [0, 2, 1, 3]) {
-        const quick = await rasterize(bitmap, rotation, 1);
-        if (!hasFormMarkers(quick.gray, quick.width, quick.height, 1)) continue;
-        const full = await rasterize(bitmap, rotation);
-        const candidate = scanForm(full.gray, full.width, full.height); filterUnusedWarnings(candidate.answers, state.captureDraft?.questionCounts);
-        const identityDigits = (candidate.seatNumber + candidate.examCode).replace(/\?/g, '').length, markedAnswers = candidate.answers.multipleChoice.filter(Boolean).length + candidate.answers.trueFalse.filter(value => value !== null).length + candidate.answers.numeric.filter(Boolean).length;
-        if (identityDigits || markedAnswers) { scan = candidate; if (/^\d{4}$/.test(candidate.examCode) && candidate.examCode !== state.captureDraft?.expectedExamCode) mismatchCode = candidate.examCode; break; }
-      }
-    } finally { bitmap.close(); }
+    for (const rotation of [0, 2, 1, 3]) {
+      const quick = await rasterize(canvas, rotation, 1);
+      if (!hasFormMarkers(quick.gray, quick.width, quick.height, 1)) continue;
+      const full = await rasterize(canvas, rotation);
+      const candidate = scanForm(full.gray, full.width, full.height);
+      candidate.rotation = rotation;
+      filterUnusedWarnings(candidate.answers, state.captureDraft?.questionCounts);
+      const identityDigits = (candidate.seatNumber + candidate.examCode).replace(/\?/g, '').length, markedAnswers = candidate.answers.multipleChoice.filter(Boolean).length + candidate.answers.trueFalse.filter(value => value !== null).length + candidate.answers.numeric.filter(Boolean).length;
+      if (identityDigits || markedAnswers) { scan = candidate; if (/^\d{4}$/.test(candidate.examCode) && candidate.examCode !== state.captureDraft?.expectedExamCode) mismatchCode = candidate.examCode; break; }
+    }
     if (session !== cameraSession) return;
+    const frameEl = root.querySelector('.camera-frame');
     if (scan) {
-      const signature = scanSignature(scan); stable.count = signature === stable.signature ? stable.count + 1 : 1; stable.signature = signature;
+      foundScan = true;
+      const signature = scanSignature(scan);
+      stable.count = signature === stable.signature ? stable.count + 1 : 1;
+      stable.consecutive = (scan.seatNumber === stable.seatNumber && scan.examCode === stable.examCode) ? stable.consecutive + 1 : 1;
+      stable.signature = signature;
+      stable.seatNumber = scan.seatNumber;
+      stable.examCode = scan.examCode;
+      const locked = stable.count >= 2 || stable.consecutive >= 3;
       const draft = state.captureDraft; if (!draft) return;
-      draft.firstPage = photo; draft.scanPage = photo; draft.scanResult = scan; draft.score = gradeSubmission(draft.examKey || {}, scan.answers, draft.policy || {}); draft.seatNumber = scan.seatNumber; draft.examCode = scan.examCode; draft.cameraUsed = true; draft.cameraStable = stable.count >= 2;
+      const data = await localState();
+      const matchedExam = data.exams.find(x => x.code === scan.examCode) || data.exams.find(x => x.id === draft.examId);
+      draft.scanResult = scan;
+      draft.seatNumber = scan.seatNumber;
+      draft.examCode = scan.examCode;
+      draft.cameraUsed = true;
+      draft.cameraStable = locked;
+      syncCaptureExam(draft, data.exams, matchedExam);
+      if (frameEl) { frameEl.classList.toggle('is-detecting', !locked); frameEl.classList.toggle('is-locked', locked); }
       const form = root.querySelector('#capture-form');
       if (form) {
         form.elements.seatNumber.value = scan.seatNumber;
         form.elements.examCode.value = scan.examCode;
+        if (matchedExam && form.elements.captureExamId) form.elements.captureExamId.value = matchedExam.id;
         for (let i = 0; i < 40; i++) if (form.elements[`mc-${i}`]) form.elements[`mc-${i}`].value = scan.answers.multipleChoice[i] || '';
         for (let i = 0; i < 32; i++) if (form.elements[`tf-${i}`]) form.elements[`tf-${i}`].value = scan.answers.trueFalse[i] == null ? '' : String(scan.answers.trueFalse[i]);
         for (let i = 0; i < 6; i++) if (form.elements[`num-${i}`]) form.elements[`num-${i}`].value = scan.answers.numeric[i] || '';
         syncPickerButtons(form);
       }
       const result = root.querySelector('#capture-result'); if (result) result.innerHTML = captureResultMarkup(draft);
-      const saveBtn = root.querySelector('button[type="submit"][form="capture-form"]'); if (saveBtn) saveBtn.disabled = stable.count < 2;
-      setCameraStatus(stable.count > 1 ? (mismatchCode ? 'Đã đọc phiếu. Mã đề khác đề đã chọn; kiểm tra trước khi lưu.' : 'Đã nhận phiếu ổn định. Kiểm tra các ô cảnh báo trước khi lưu.') : 'Đã đọc phiếu. Điểm tạm hiện; giữ phiếu yên.');
-      if (stable.count >= 2) {
-        draft.manual = false;
-        const data = await localState(), exam = data.exams.find(x => x.code === scan.examCode) || data.exams.find(x => x.id === draft.examId);
-        draft.seatNumber = scan.seatNumber; draft.examCode = scan.examCode;
-        syncCaptureExam(draft, data.exams, exam);
+      root.querySelectorAll('button[type="submit"][form="capture-form"]').forEach(btn => btn.disabled = !locked);
+      setCameraStatus(locked ? (mismatchCode && !matchedExam ? 'Đã đọc phiếu. Mã đề khác đề đã chọn; kiểm tra trước khi lưu.' : 'Đã nhận phiếu ổn định. Kiểm tra các ô cảnh báo trước khi lưu.') : 'Đã thấy phiếu! Giữ yên 1 nhịp để khóa kết quả…');
+      if (locked) {
+        const photo = await canvasToBlob(canvas);
+        if (session !== cameraSession) return;
+        draft.firstPage = photo; draft.scanPage = photo; draft.manual = false;
         stopCamera(); captureDialogContent(draft, data); notify('Đã tự quét phiếu. Điểm tạm tính đã hiện.'); return;
       }
     } else {
-      stable.signature = ''; stable.count = 0;
-      const draft = state.captureDraft; draft.cameraStable = false; draft.cameraUsed = true; draft.scanResult = null; draft.score = null;
-      const result = root.querySelector('#capture-result'); if (result) result.innerHTML = '';
-      const saveBtn = root.querySelector('button[type="submit"][form="capture-form"]'); if (saveBtn) saveBtn.disabled = true;
-      setCameraStatus(mismatchCode ? `Mã phiếu ${mismatchCode} khác mã đề đã chọn (${draft.expectedExamCode}).` : 'Đưa đủ bốn mốc đen vào khung, rồi giữ phiếu yên.');
+      stable.signature = ''; stable.count = 0; stable.consecutive = 0; stable.seatNumber = ''; stable.examCode = '';
+      if (frameEl) frameEl.classList.remove('is-detecting', 'is-locked');
+      const draft = state.captureDraft;
+      if (draft) {
+        draft.cameraStable = false; draft.cameraUsed = true; draft.scanResult = null; draft.score = null;
+        const result = root.querySelector('#capture-result'); if (result) result.innerHTML = '';
+        root.querySelectorAll('button[type="submit"][form="capture-form"]').forEach(btn => btn.disabled = true);
+        setCameraStatus(mismatchCode ? `Mã phiếu ${mismatchCode} khác mã đề đã chọn (${draft.expectedExamCode}).` : 'Đưa đủ bốn mốc đen vào khung, rồi giữ phiếu yên.');
+      }
     }
   } catch (error) { setCameraStatus(error.message || 'Không đọc được khung hình. Căn lại phiếu.'); }
   finally { if (session === cameraSession) cameraBusy = false; }
-  if (cameraStream && session === cameraSession) cameraTimer = setTimeout(() => scanCameraFrame(video, stable, session), 350);
+  if (cameraStream && session === cameraSession) cameraTimer = setTimeout(() => scanCameraFrame(video, stable, session), foundScan ? 120 : 200);
 }
 
 async function startCamera() {
@@ -990,14 +1016,15 @@ async function startCamera() {
     const draft = state.captureDraft; if (!draft) { stopCamera(); return; }
     draft.cameraUsed = true; draft.cameraStable = false; draft.cameraAccepted = false;
     disableCaptureFields(true);
-    const live = root.querySelector('#live-camera'), startBtn = root.querySelector('[data-action="start-camera"]'), stop = root.querySelector('[data-action="stop-camera"]'), status = root.querySelector('#camera-status');
-    if (live) live.hidden = false; if (startBtn) startBtn.hidden = true; if (stop) stop.hidden = false; if (status) status.hidden = false;
+    const live = root.querySelector('#live-camera'), startBtn = root.querySelector('[data-action="start-camera"]'), snapBtn = root.querySelector('[data-action="snap-camera"]'), stop = root.querySelector('[data-action="stop-camera"]'), status = root.querySelector('#camera-status');
+    if (live) live.hidden = false; if (startBtn) startBtn.hidden = true; if (snapBtn) snapBtn.hidden = false; if (stop) stop.hidden = false; if (status) status.hidden = false;
+    root.querySelector('.camera-frame')?.classList.remove('is-detecting', 'is-locked');
     const result = root.querySelector('#capture-result'); if (result) result.innerHTML = captureResultMarkup(draft);
-    const saveBtn = root.querySelector('button[type="submit"][form="capture-form"]'); if (saveBtn) saveBtn.disabled = true;
+    root.querySelectorAll('button[type="submit"][form="capture-form"]').forEach(btn => btn.disabled = true);
     setCameraStatus('Đang tìm phiếu. Đưa đủ bốn mốc vào khung.');
     const video = root.querySelector('#scan-camera'); if (!video) throw new Error('Không mở được khung camera.');
     video.srcObject = stream; await video.play(); if (session !== cameraSession) return;
-    scanCameraFrame(video, { signature: '', count: 0 }, session);
+    scanCameraFrame(video, { signature: '', count: 0, consecutive: 0, seatNumber: '', examCode: '' }, session);
   } catch (error) {
     if (session === cameraSession) stopCamera();
     const message = error.name === 'NotAllowedError' ? 'Trình duyệt chưa được cấp quyền camera. Bật quyền Camera rồi thử lại.' : error.name === 'NotFoundError' ? 'Không tìm thấy camera trên thiết bị.' : 'Không mở được camera. Dùng HTTPS hoặc chọn ảnh bên dưới.';
@@ -1126,7 +1153,23 @@ async function handleSubmit(event) {
       if (!roster.length) answers.reviewItems.push(`SBD ${seat}: không khớp danh sách lớp`);
       if (code !== exam.code) answers.reviewItems.push(`Mã đề ${code}: khác mã đề đã chọn (${exam.code})`);
       const id = crypto.randomUUID(), submission = { id, batchId: batch.id, examId: exam.id, className: batch.className, seatNumber: seat || '????????', recognizedSeatNumber: draft.scanResult.seatNumber, studentName: roster.length === 1 ? roster[0].fullName : '', examCode: code || '????', recognizedExamCode: draft.scanResult.examCode, recognizedAnswers: draft.scanResult.answers, scanMeta: { profile: draft.scanResult.testProfile || 'qm', observed: draft.scanResult.observed || null, rotation: draft.scanResult.rotation || 0 }, answers, score: scoreFor(exam, answers), firstPageId: draft.firstPage ? `${id}-1` : null, secondPageId: draft.secondPage ? `${id}-2` : null, needsReview: answers.reviewItems.length > 0, reviewed: false, confirmed: false, createdAt: Date.now() };
-      await savePaper(submission, draft.firstPage, draft.secondPage); closeDialog(); state.batchId = batch.id; state.view = 'submission'; state.submissionId = submission.id; resetViewer(); await render(); notify('Đã lưu bài và tính điểm tạm.');
+      const saveAndNext = event.submitter?.value === 'save-and-next', usedCamera = !!draft.cameraUsed;
+      await savePaper(submission, draft.firstPage, draft.secondPage);
+      if (saveAndNext) {
+        const data = await localState();
+        if (data.submissions.filter(x => x.batchId === batch.id).length >= 100) {
+          closeDialog(); state.batchId = batch.id; state.view = 'submission'; state.submissionId = submission.id; resetViewer(); await render();
+          notify('Đã lưu bài cuối cùng (đợt chấm đã đủ 100 bài).');
+          return;
+        }
+        closeDialog();
+        await render();
+        captureDialog(batch, data);
+        notify(`Đã lưu SBD ${seat} (${fmt(submission.score.totalEarned)}/${fmt(submission.score.totalPossible)}). Sẵn sàng quét bài tiếp!`);
+        if (usedCamera) await startCamera().catch(() => {});
+        return;
+      }
+      closeDialog(); state.batchId = batch.id; state.view = 'submission'; state.submissionId = submission.id; resetViewer(); await render(); notify('Đã lưu bài và tính điểm tạm.');
     }
     if (form.id === 'review-form') {
       const id = form.dataset.id, submissions = await all('submissions'), submission = submissions.find(x => x.id === id);
@@ -1317,6 +1360,27 @@ async function handleClick(event) {
       return;
     }
     if (action === 'start-camera') await startCamera();
+    if (action === 'snap-camera') {
+      const video = root.querySelector('#scan-camera'), draft = state.captureDraft;
+      if (!video || !draft) return;
+      const canvas = captureVideoCanvas(video);
+      if (!canvas) throw new Error('Camera chưa sẵn sàng. Chờ khung hình hiển thị.');
+      const photo = await canvasToBlob(canvas);
+      if (!photo) throw new Error('Không chụp được khung hình.');
+      stopCamera();
+      draft.firstPage = photo; draft.scanPage = photo; draft.manual = false;
+      draft.cameraUsed = true; draft.cameraAccepted = true;
+      draft.scanResult = await scanPhoto(photo, FORM.scale, draft.questionCounts);
+      const data = await localState();
+      draft.seatNumber = draft.scanResult.seatNumber || '';
+      draft.examCode = draft.scanResult.examCode || draft.examCode;
+      const exam = data.exams.find(x => x.code === draft.examCode) || data.exams.find(x => x.id === draft.examId);
+      syncCaptureExam(draft, data.exams, exam);
+      draft.cameraStatus = hasRecognizedMarks(draft.scanResult) ? 'Đã chụp & nhận dạng phiếu từ camera.' : 'Đã chụp ảnh nhưng chưa nhận dạng đủ mốc; kiểm tra hoặc sửa tay.';
+      captureDialogContent(draft, data);
+      notify(draft.cameraStatus);
+      return;
+    }
     if (action === 'stop-camera') {
       const draft = state.captureDraft; stopCamera();
       if (draft?.scanResult) { draft.cameraUsed = false; draft.cameraAccepted = true; draft.cameraStatus = 'Đã dừng quét. Kiểm tra điểm và cảnh báo trước khi lưu.'; captureDialogContent(draft, await localState()); notify('Đã dừng quét. Kiểm tra phiếu trước khi lưu.'); }

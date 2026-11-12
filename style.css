@@ -1767,9 +1767,10 @@ select.inline-meta-input {
 
 .live-camera {
   position: relative;
-  width: min(100%, 280px);
+  width: min(100%, 380px);
   aspect-ratio: 595 / 842;
   margin-top: 10px;
+  margin-inline: auto;
   overflow: hidden;
   border: 0.5px solid var(--line);
   border-radius: var(--radius-md);
@@ -1786,10 +1787,19 @@ select.inline-meta-input {
 .camera-frame {
   position: absolute;
   inset: 3%;
-  border: 2px solid rgba(10, 132, 255, 0.85);
-  border-radius: 8px;
+  border: 2.5px solid rgba(10, 132, 255, 0.9);
+  border-radius: 10px;
   box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.28);
   pointer-events: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.camera-frame.is-detecting {
+  border-color: var(--amber);
+}
+
+.camera-frame.is-locked {
+  border-color: var(--green);
 }
 
 .warning-list {

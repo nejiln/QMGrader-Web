@@ -149,26 +149,30 @@ function findMarker(pixels,width,height,center,minSize=10,scale=FORM.scale) {
   const top=Math.max(0,Math.floor(expectedY-radius)),bottom=Math.min(height-1,Math.floor(expectedY+radius));
   const rw=right-left+1,rh=bottom-top+1;
   if (rw<=0||rh<=0) return null;
-  const seen=new Uint8Array(rw*rh), min=Math.floor(minSize*s), max=20*s;
-  let best=null,bestDistance=Infinity;
-  for (let start=0;start<seen.length;start++) {
-    if (seen[start]) continue;
-    const sx=left+start%rw,sy=top+Math.floor(start/rw); seen[start]=1;
-    if (pixels[sy*width+sx]>=75) continue;
-    const queue=[start];let cursor=0,minX=sx,maxX=sx,minY=sy,maxY=sy,sumX=0,sumY=0;
-    while(cursor<queue.length){
-      const k=queue[cursor++],x=left+k%rw,y=top+Math.floor(k/rw);sumX+=x;sumY+=y;
-      minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);
-      for(let ny=Math.max(top,y-1);ny<=Math.min(bottom,y+1);ny++) for(let nx=Math.max(left,x-1);nx<=Math.min(right,x+1);nx++){
-        const n=(ny-top)*rw+nx-left;if(seen[n])continue;seen[n]=1;if(pixels[ny*width+nx]<75)queue.push(n);
+  const min=Math.floor(minSize*s), max=20*s;
+  for (const darkThreshold of [75, 115]) {
+    const seen=new Uint8Array(rw*rh);
+    let best=null,bestDistance=Infinity;
+    for (let start=0;start<seen.length;start++) {
+      if (seen[start]) continue;
+      const sx=left+start%rw,sy=top+Math.floor(start/rw); seen[start]=1;
+      if (pixels[sy*width+sx]>=darkThreshold) continue;
+      const queue=[start];let cursor=0,minX=sx,maxX=sx,minY=sy,maxY=sy,sumX=0,sumY=0;
+      while(cursor<queue.length){
+        const k=queue[cursor++],x=left+k%rw,y=top+Math.floor(k/rw);sumX+=x;sumY+=y;
+        minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);
+        for(let ny=Math.max(top,y-1);ny<=Math.min(bottom,y+1);ny++) for(let nx=Math.max(left,x-1);nx<=Math.min(right,x+1);nx++){
+          const n=(ny-top)*rw+nx-left;if(seen[n])continue;seen[n]=1;if(pixels[ny*width+nx]<darkThreshold)queue.push(n);
+        }
       }
+      const bw=maxX-minX+1,bh=maxY-minY+1;
+      if(bw<min||bh<min||bw>max||bh>max||Math.abs(bw-bh)>Math.max(bw,bh)*0.3||queue.length<min*min/2)continue;
+      const point=[sumX/queue.length/s,sumY/queue.length/s],dx=point[0]-center[0],dy=point[1]-center[1],distance=dx*dx+dy*dy;
+      if(distance<bestDistance){best=point;bestDistance=distance;}
     }
-    const bw=maxX-minX+1,bh=maxY-minY+1;
-    if(bw<min||bh<min||bw>max||bh>max||Math.abs(bw-bh)>Math.max(bw,bh)*0.3||queue.length<min*min/2)continue;
-    const point=[sumX/queue.length/s,sumY/queue.length/s],dx=point[0]-center[0],dy=point[1]-center[1],distance=dx*dx+dy*dy;
-    if(distance<bestDistance){best=point;bestDistance=distance;}
+    if (best) return best;
   }
-  return best;
+  return null;
 }
 function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=FORM,inkThreshold=150,fillFraction=0.24) {
   const [cx,cy]=markerMap(point,observed,scale,profile.markers),r=1.1*scale,ix=Math.floor(cx),iy=Math.floor(cy);

@@ -63,9 +63,9 @@ const templateZip=unzipSync(rosterTemplateXlsx()),templateSheet=strFromU8(templa
 assert.match(templateSheet,/<t>SBD<\/t>/);assert.match(templateSheet,/<t>Họ tên<\/t>/);assert.match(templateSheet,/<t>Lớp<\/t>/);
 assert.match(scoreCSV([{seatNumber:'=2+2',studentName:'An',className:'12A1',examCode:'2025',score:gradeSubmission(key,{...answers},policy),needsReview:true}]),/"'=2\+2"/);
 
-const width=595*FORM.scale,height=842*FORM.scale,gray=new Uint8Array(width*height).fill(255),skew=p=>[1+FORM.scale*(p[0]+0.02*p[1]),2+FORM.scale*(p[1]+0.01*p[0])];
-function fillSquare(point,side,color=0){const [cx,cy]=skew(point),r=side*FORM.scale/2;for(let y=Math.floor(cy-r);y<=cy+r;y++)for(let x=Math.floor(cx-r);x<=cx+r;x++)if(x>=0&&y>=0&&x<width&&y<height)gray[y*width+x]=color;}
-function fillBubble(point,color=0){const [cx,cy]=skew(point),r=3.5*FORM.scale;for(let y=Math.floor(cy-r);y<=cy+r;y++)for(let x=Math.floor(cx-r);x<=cx+r;x++)if((x-cx)**2+(y-cy)**2<=r*r&&x>=0&&y>=0&&x<width&&y<height)gray[y*width+x]=color;}
+const width=595*FORM.scale,height=842*FORM.scale,gray=new Uint8Array(width*height).fill(255),skew=p=>{const perspective=1+0.00001*p[0]+0.00001*p[1];return [1+FORM.scale*(p[0]+0.02*p[1])/perspective,2+FORM.scale*(p[1]+0.01*p[0])/perspective];};
+function fillSquare(point,side,color=0,target=gray){const [cx,cy]=skew(point),r=side*FORM.scale/2;for(let y=Math.floor(cy-r);y<=cy+r;y++)for(let x=Math.floor(cx-r);x<=cx+r;x++)if(x>=0&&y>=0&&x<width&&y<height)target[y*width+x]=color;}
+function fillBubble(point,color=0,target=gray){const [cx,cy]=skew(point),r=3.5*FORM.scale;for(let y=Math.floor(cy-r);y<=cy+r;y++)for(let x=Math.floor(cx-r);x<=cx+r;x++)if((x-cx)**2+(y-cy)**2<=r*r&&x>=0&&y>=0&&x<width&&y<height)target[y*width+x]=color;}
 for(const point of [FORM.markers[0],FORM.markers[1],FORM.markers[2],FORM.markers[3]])fillSquare(point,12);
 for(const point of FORM.orientation)fillSquare(point,8);
 const seat='12345678',code='2025';
@@ -82,6 +82,8 @@ assert.ok(scan.answers.multipleChoice.every((value,index)=>value==='ABCD'[index%
 assert.ok(scan.answers.trueFalse.every((value,index)=>value===(index%4===0)));
 assert.ok(scan.answers.numeric.every(value=>value==='-1.25'));
 assert.equal(scan.answers.reviewItems.length,0);
+const integerOnly=new Uint8Array(width*height).fill(255);for(const point of FORM.markers)fillSquare(point,12,0,integerOnly);for(const point of FORM.orientation)fillSquare(point,8,0,integerOnly);fillBubble([FORM.numericColumns[0][0],FORM.digitRows[4]],0,integerOnly);
+assert.equal(scanForm(integerOnly,width,height).answers.numeric[0],'4');
 const liveScale=2,liveWidth=FORM.pageWidth*liveScale,liveHeight=FORM.pageHeight*liveScale,liveGray=new Uint8Array(liveWidth*liveHeight);
 for(let y=0;y<liveHeight;y++)for(let x=0;x<liveWidth;x++)liveGray[y*liveWidth+x]=gray[Math.floor(y*FORM.scale/liveScale)*width+Math.floor(x*FORM.scale/liveScale)];
 assert.equal(hasFormMarkers(liveGray,liveWidth,liveHeight,liveScale),true);
@@ -120,6 +122,14 @@ for(const [column,digit] of [[6,7],[7,8]]){
 const faintScan=scanForm(faintIdentity,width,height);
 assert.equal(faintScan.seatNumber,seat);
 assert.ok(!faintScan.answers.reviewItems.some(item=>item.startsWith('SBD cột 7')||item.startsWith('SBD cột 8')));
+
+// Camera quick-check at scale=1 with brighter exposure (marker gray=98)
+const camW=FORM.pageWidth,camH=FORM.pageHeight,camGray=new Uint8Array(camW*camH).fill(245);
+function camSquare(point,side,color=98){const cx=point[0],cy=point[1],r=side/2;for(let y=cy-r;y<=cy+r;y++)for(let x=cx-r;x<=cx+r;x++)if(x>=0&&y>=0&&x<camW&&y<camH)camGray[Math.floor(y)*camW+Math.floor(x)]=color;}
+for(const point of PHOTO_FORM.markers)camSquare(point,13,98);
+for(const point of PHOTO_FORM.orientation)camSquare(point,8,98);
+assert.equal(hasFormMarkers(camGray,camW,camH,1),true);
+assert.equal(scanSignature(photoScan),scanSignature(photoScan));
 
 const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14','qm-cham-qmgrader-web-v15','qm-cham-qmgrader-web-v16','qm-cham-qmgrader-web-v17','qm-cham-qmgrader-web-v18','qm-cham-qmgrader-web-v19','qm-cham-qmgrader-web-v20','qm-cham-qmgrader-web-v21','qm-cham-qmgrader-web-v22'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
