@@ -1,4 +1,4 @@
-import { FORM, PHOTO_FORM, mapProfilePoint, gradeSubmission, regradeSubmission, emptyAnswers, scoreCSV, scanForm, hasFormMarkers, scanSignature } from './core.mjs';
+import { FORM, PHOTO_FORM, mapProfilePoint, canonicalDecimal, gradeSubmission, regradeSubmission, emptyAnswers, scoreCSV, scanForm, hasFormMarkers, scanSignature } from './core.mjs';
 import { extractAnswerKeyVariants, importRosterFile, readDocument } from './imports.mjs';
 
 const root = document.querySelector('#app'), toastBox = document.querySelector('#toast');
@@ -399,7 +399,8 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
   const item = submissions.find(s => s.id === state.submissionId);
   if (!item) { state.view = 'batch-detail'; return batchDetailPage({ submissions, batches, exams: [], roster: [] }); }
   const score = item.score, reviewItems = item.answers.reviewItems || [];
-  const counts = exams.find(exam => exam.id === item.examId)?.questionCounts || { multipleChoice: 40, trueFalse: 8, numeric: 6 };
+  const currentExam = exams.find(exam => exam.code === item.examCode) || exams.find(exam => exam.id === item.examId);
+  const counts = currentExam?.questionCounts || { multipleChoice: 40, trueFalse: 8, numeric: 6 };
   const activeImg = state.viewer.page === 2 && second ? second : first || second;
   const imgUrl = activeImg ? photoURL(activeImg) : '';
   const { zoom, rotate, panX, panY, highlightKey } = state.viewer;
@@ -492,7 +493,7 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
             </details>
           ` : ''}
 
-          ${answerEditor(item.answers, counts, reviewItems)}
+          ${answerEditor(item.answers, counts, reviewItems, currentExam?.answerKey)}
 
           <div class="sticky-action-bar">
             <label class="check-inline">
@@ -512,32 +513,42 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
   `;
 }
 
-function mcRowMarkup(prefix, index, value, label, hasWarning = false) {
+function mcRowMarkup(prefix, index, value, label, hasWarning = false, keyVal = undefined) {
   const val = value || '';
+  const hasKey = keyVal !== undefined && keyVal !== null && keyVal !== '';
   return `
     <div class="mc-row ${hasWarning ? 'has-warning' : ''}" data-question-target="${prefix}-${index}">
       <span class="q-num">${esc(label)}</span>
-      <input type="hidden" id="${prefix}-${index}" name="${prefix}-${index}" value="${esc(val)}">
+      <input type="hidden" id="${prefix}-${index}" name="${prefix}-${index}" value="${esc(val)}" ${hasKey ? `data-key="${esc(keyVal)}"` : ''}>
       <div class="choice-group" role="group" aria-label="${esc(label)}">
-        ${['A', 'B', 'C', 'D'].map(opt => `<button type="button" class="choice-btn" data-action="pick-choice" data-target="${prefix}-${index}" data-value="${opt}" aria-pressed="${val === opt}">${opt}</button>`).join('')}
+        ${['A', 'B', 'C', 'D'].map(opt => {
+          const pressed = val === opt;
+          const cls = hasKey ? (pressed ? (opt === keyVal ? 'is-correct' : 'is-wrong') : (opt === keyVal ? 'is-key-hint' : '')) : '';
+          return `<button type="button" class="choice-btn ${cls}" data-action="pick-choice" data-target="${prefix}-${index}" data-value="${opt}" aria-pressed="${pressed}">${opt}</button>`;
+        }).join('')}
       </div>
     </div>
   `;
 }
 
-function tfCardMarkup(prefix, qIndex, values, warningSet = new Set()) {
+function tfCardMarkup(prefix, qIndex, values, warningSet = new Set(), keyValues = undefined) {
   const subs = ['a', 'b', 'c', 'd'].map((letter, j) => {
     const idx = qIndex * 4 + j;
     const raw = values?.[idx];
     const strVal = raw === true ? 'true' : raw === false ? 'false' : '';
+    const keyRaw = keyValues?.[idx];
+    const hasKey = typeof keyRaw === 'boolean';
+    const keyStr = hasKey ? String(keyRaw) : '';
     const hasWarn = warningSet.has(`${prefix}-${idx}`);
+    const clsTrue = hasKey ? (strVal === 'true' ? (keyStr === 'true' ? 'is-correct' : 'is-wrong') : (keyStr === 'true' ? 'is-key-hint' : '')) : '';
+    const clsFalse = hasKey ? (strVal === 'false' ? (keyStr === 'false' ? 'is-correct' : 'is-wrong') : (keyStr === 'false' ? 'is-key-hint' : '')) : '';
     return `
       <div class="tf-subrow ${hasWarn ? 'has-warning' : ''}" data-question-target="${prefix}-${idx}">
         <span class="tf-label">Ý ${letter})</span>
-        <input type="hidden" id="${prefix}-${idx}" name="${prefix}-${idx}" value="${strVal}">
+        <input type="hidden" id="${prefix}-${idx}" name="${prefix}-${idx}" value="${strVal}" ${hasKey ? `data-key="${keyStr}"` : ''}>
         <div class="choice-group" role="group" aria-label="Câu ${qIndex + 1} ý ${letter}">
-          <button type="button" class="choice-btn" data-action="pick-choice" data-target="${prefix}-${idx}" data-value="true" aria-pressed="${strVal === 'true'}">Đ</button>
-          <button type="button" class="choice-btn tf-false" data-action="pick-choice" data-target="${prefix}-${idx}" data-value="false" aria-pressed="${strVal === 'false'}">S</button>
+          <button type="button" class="choice-btn ${clsTrue}" data-action="pick-choice" data-target="${prefix}-${idx}" data-value="true" aria-pressed="${strVal === 'true'}">Đ</button>
+          <button type="button" class="choice-btn ${clsFalse}" data-action="pick-choice" data-target="${prefix}-${idx}" data-value="false" aria-pressed="${strVal === 'false'}">S</button>
         </div>
       </div>
     `;
@@ -545,16 +556,24 @@ function tfCardMarkup(prefix, qIndex, values, warningSet = new Set()) {
   return `<div class="tf-card"><div class="tf-card-head"><span class="tf-q-num">Câu ${qIndex + 1}</span></div><div class="tf-subrows">${subs}</div></div>`;
 }
 
-function answerEditor(answers, counts = { multipleChoice: 40, trueFalse: 8, numeric: 6 }, reviewItems = []) {
+function answerEditor(answers, counts = { multipleChoice: 40, trueFalse: 8, numeric: 6 }, reviewItems = [], answerKey = null) {
   const warningTargets = new Set(reviewItems.map(m => warningTargetInfo(m).target).filter(Boolean));
-  const mc = Array.from({ length: counts.multipleChoice }, (_, i) => mcRowMarkup('mc', i, answers.multipleChoice?.[i], `Câu ${String(i + 1).padStart(2, '0')}`, warningTargets.has(`mc-${i}`))).join('');
-  const tf = Array.from({ length: counts.trueFalse }, (_, q) => tfCardMarkup('tf', q, answers.trueFalse, warningTargets)).join('');
-  const numeric = Array.from({ length: counts.numeric }, (_, i) => `
-    <div class="numeric-card ${warningTargets.has(`num-${i}`) ? 'has-warning' : ''}" data-question-target="num-${i}">
-      <label for="num-${i}">Câu ${i + 1}</label>
-      <input id="num-${i}" class="numeric-input" name="num-${i}" inputmode="decimal" autocomplete="off" value="${esc(answers.numeric?.[i] || '')}" placeholder="—">
-    </div>
-  `).join('');
+  const mc = Array.from({ length: counts.multipleChoice }, (_, i) => mcRowMarkup('mc', i, answers.multipleChoice?.[i], `Câu ${String(i + 1).padStart(2, '0')}`, warningTargets.has(`mc-${i}`), answerKey?.multipleChoice?.[i])).join('');
+  const tf = Array.from({ length: counts.trueFalse }, (_, q) => tfCardMarkup('tf', q, answers.trueFalse, warningTargets, answerKey?.trueFalse)).join('');
+  const numeric = Array.from({ length: counts.numeric }, (_, i) => {
+    const val = answers.numeric?.[i] || '';
+    const keyVal = answerKey?.numeric?.[i];
+    const hasKey = keyVal !== undefined && keyVal !== null && String(keyVal).trim() !== '';
+    const cVal = canonicalDecimal(val), cKey = canonicalDecimal(keyVal);
+    const numCls = hasKey && String(val).trim() ? (cVal !== null && cVal === cKey ? 'is-correct' : 'is-wrong') : '';
+    return `
+      <div class="numeric-card ${warningTargets.has(`num-${i}`) ? 'has-warning' : ''}" data-question-target="num-${i}">
+        <label for="num-${i}">Câu ${i + 1}</label>
+        <input id="num-${i}" class="numeric-input ${numCls}" name="num-${i}" inputmode="decimal" autocomplete="off" value="${esc(val)}" ${hasKey ? `data-key="${esc(keyVal)}"` : ''} placeholder="—">
+        ${hasKey ? `<span class="numeric-key-hint">Đáp án: ${esc(keyVal)}</span>` : ''}
+      </div>
+    `;
+  }).join('');
 
   return `
     <details class="card answer-card" open><summary>Phần I · ${counts.multipleChoice} câu A–D</summary><div class="mc-list">${mc}</div></details>
@@ -585,7 +604,15 @@ function syncPickerButtons(container) {
   if (!container) return;
   container.querySelectorAll('.choice-btn[data-target]').forEach(btn => {
     const input = container.querySelector(`#${CSS.escape(btn.dataset.target)}`);
-    if (input) btn.setAttribute('aria-pressed', String(input.value === btn.dataset.value));
+    if (!input) return;
+    const pressed = input.value === btn.dataset.value;
+    btn.setAttribute('aria-pressed', String(pressed));
+    const keyVal = input.dataset.key;
+    btn.classList.remove('is-correct', 'is-wrong', 'is-key-hint');
+    if (keyVal !== undefined && keyVal !== '') {
+      if (pressed) btn.classList.add(btn.dataset.value === keyVal ? 'is-correct' : 'is-wrong');
+      else if (btn.dataset.value === keyVal) btn.classList.add('is-key-hint');
+    }
   });
 }
 
@@ -1294,6 +1321,14 @@ async function handlePdf(input) {
 
 async function handleInput(event) {
   const input = event.target;
+  if (input.matches('.numeric-input[data-key]')) {
+    const keyVal = input.dataset.key, val = input.value.trim();
+    input.classList.remove('is-correct', 'is-wrong');
+    if (val) {
+      const cVal = canonicalDecimal(val), cKey = canonicalDecimal(keyVal);
+      input.classList.add(cVal !== null && cVal === cKey ? 'is-correct' : 'is-wrong');
+    }
+  }
   if (input.matches('#capture-form input[name="seatNumber"], #capture-form input[name="examCode"]') && state.captureDraft) { state.captureDraft[input.name] = input.value; }
   if (input.closest('#capture-form') && /^(mc-|tf-|num-)/.test(input.name || '')) refreshCaptureScore(input.form);
 }
