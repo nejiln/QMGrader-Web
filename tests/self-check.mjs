@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { FORM, PHOTO_FORM, canonicalDecimal, emptyAnswers, gradeSubmission, hasFormMarkers, parseCSV, rosterRows, scanForm, scanSignature, scoreCSV } from '../core.mjs';
+import { FORM, PHOTO_FORM, canonicalDecimal, emptyAnswers, gradeSubmission, hasFormMarkers, parseCSV, regradeSubmission, rosterRows, scanForm, scanSignature, scoreCSV } from '../core.mjs';
 import { extractAnswerKey, extractAnswerKeyVariants, rosterTemplateXlsx } from '../imports.mjs';
 import { strFromU8, unzipSync } from '../vendor/fflate.js';
 
@@ -47,6 +47,10 @@ answers.multipleChoice[0]='B';answers.trueFalse[0]=false;answers.numeric[0]='-1.
 assert.equal(gradeSubmission(key,answers,policy).totalEarned,75);
 policy.sectionTwoRule='allOrNothing';
 assert.equal(gradeSubmission(key,answers,policy).trueFalseEarned,28);
+const examForRegrade=(code,letter)=>({id:code,code,answerKey:{multipleChoice:Array(40).fill(letter),trueFalse:Array(32).fill(false),numeric:Array(6).fill('0')},questionCounts:{multipleChoice:40,trueFalse:8,numeric:6},policy});
+const regraded=regradeSubmission({examId:'9001',className:'12A1',recognizedSeatNumber:'11111111',recognizedExamCode:'9001',answers:emptyAnswers()},[examForRegrade('9001','A'),examForRegrade('9002','B')],[{className:'12A1',seatNumber:'22222222',fullName:'An'}],'22222222','9002',{...answers,reviewItems:[]});
+assert.equal(regraded.examId,'9002');assert.equal(regraded.score.multipleChoiceEarned,1);assert.equal(regraded.studentName,'An');assert.ok(regraded.answers.reviewItems.includes('Mã đề đã sửa sau khi nhận dạng'));
+assert.throws(()=>regradeSubmission({},[examForRegrade('9001','A')],[],'22222222','9999',emptyAnswers()),/Không tìm thấy đề mã 9999/);
 
 const rows=parseCSV('\uFEFFSBD;Họ tên;Lớp\r\n00000123;"Nguyễn, An";12A1\r\n00000124;"Bình ""B""";12A1');
 assert.deepEqual(rows[1],['00000123','Nguyễn, An','12A1']);
@@ -120,7 +124,7 @@ assert.ok(!faintScan.answers.reviewItems.some(item=>item.startsWith('SBD cột 7
 const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14','qm-cham-qmgrader-web-v15','qm-cham-qmgrader-web-v16','qm-cham-qmgrader-web-v17','qm-cham-qmgrader-web-v18','qm-cham-qmgrader-web-v19','qm-cham-qmgrader-web-v20'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
-assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14','qm-cham-qmgrader-web-v15','qm-cham-qmgrader-web-v16','qm-cham-qmgrader-web-v17','qm-cham-qmgrader-web-v18','qm-cham-qmgrader-web-v19'].sort());
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14','qm-cham-qmgrader-web-v15','qm-cham-qmgrader-web-v16','qm-cham-qmgrader-web-v17','qm-cham-qmgrader-web-v18','qm-cham-qmgrader-web-v19','qm-cham-qmgrader-web-v20'].sort());
 
 for(const [system,saved,expected] of [['dark',null,'dark'],['light',null,'light'],['dark','light','light']]){
   const document={documentElement:{dataset:{}},querySelector:()=>({setAttribute(name,value){this[name]=value;}})};

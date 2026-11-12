@@ -68,6 +68,19 @@ export function gradeSubmission(key, answers, policy) {
   return score;
 }
 
+export function regradeSubmission(submission, exams, roster, seatNumber, examCode, answers) {
+  if(!/^\d{8}$/.test(seatNumber)||!/^\d{4}$/.test(examCode))throw new Error('SBD phải đủ 8 số, mã đề phải đủ 4 số.');
+  const exam=exams.find(item=>item.code===examCode);
+  if(!exam)throw new Error(`Không tìm thấy đề mã ${examCode}. Nạp đáp án mã này trước khi chấm lại.`);
+  answers.reviewItems=(submission.answers.reviewItems||[]).filter(message=>!message.startsWith('SBD đã sửa')&&!message.startsWith('Mã đề đã sửa')&&!(message.startsWith('SBD ')&&message.includes('danh sách lớp'))&&!(message.startsWith('Mã đề ')&&message.includes('khác mã đề đã chọn')));
+  if(seatNumber!==submission.recognizedSeatNumber)answers.reviewItems.push('SBD đã sửa sau khi nhận dạng');
+  if(examCode!==submission.recognizedExamCode)answers.reviewItems.push('Mã đề đã sửa sau khi nhận dạng');
+  const matches=roster.filter(item=>item.className===submission.className&&item.seatNumber===seatNumber);
+  if(matches.length>1)answers.reviewItems.push(`SBD ${seatNumber}: trùng trong danh sách lớp`);
+  if(!matches.length)answers.reviewItems.push(`SBD ${seatNumber}: không khớp danh sách lớp`);
+  return {...submission,examId:exam.id,seatNumber,examCode,studentName:matches.length===1?matches[0].fullName:'',answers,score:gradeSubmission(exam.answerKey,answers,{...exam.policy,questionCounts:exam.questionCounts}),needsReview:answers.reviewItems.length>0,reviewed:false,confirmed:false};
+}
+
 export function parseCSV(text) {
   const source = String(text).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   const sample = source.split('\n', 2)[0] || '';
