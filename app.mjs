@@ -482,6 +482,7 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
             <div class="sticky-buttons">
               <button class="button danger sm" type="button" data-action="delete-submission" data-id="${esc(item.id)}">Xóa</button>
               <button class="button secondary sm" type="submit" name="action" value="save">Lưu nháp</button>
+              <button class="button secondary sm" type="submit" name="action" value="regrade">Chấm lại</button>
               <button class="button" type="submit" name="action" value="finalize-next">${icon('mark')}Chốt điểm & Bài tiếp theo</button>
             </div>
           </div>
