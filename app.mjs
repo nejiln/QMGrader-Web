@@ -449,6 +449,12 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
               ${statusPill(item)}
             </div>
             <div class="inline-meta-grid">
+              <div class="inline-meta-field">
+                <label for="inline-exam">Đề thi</label>
+                <select id="inline-exam" class="inline-meta-input" data-action="select-submission-exam">
+                  ${exams.map(e => `<option value="${esc(e.id)}" ${e.code === item.examCode ? 'selected' : ''}>${esc(e.name)} (${esc(e.code)})</option>`).join('')}
+                </select>
+              </div>
               <div class="inline-meta-field ${seatWarn ? 'has-warning' : ''}" data-question-target="seatNumber">
                 <label for="inline-seat">SBD</label>
                 <input id="inline-seat" class="inline-meta-input" name="seatNumber" inputmode="numeric" maxlength="8" value="${esc(item.seatNumber)}">
@@ -654,7 +660,7 @@ function examDialog(exam) {
     <form id="exam-form" data-id="${esc(exam?.id || '')}" data-code="${esc(exam?.code || '')}">
       <div class="form-grid">
         <label class="field"><span>Tên đề</span><input name="name" required maxlength="80" value="${esc(exam?.name || '')}" placeholder="Ví dụ: Kiểm tra giữa kỳ 1"></label>
-        ${exam ? `<div class="field"><span>Mã đề</span><input value="Mã ${esc(exam.code)}" disabled></div>` : ''}
+        <label class="field"><span>Mã đề (4 số)</span><input name="examCodeInput" inputmode="numeric" maxlength="4" value="${esc(exam?.code || '')}" placeholder="Ví dụ: 1101" ${exam ? 'disabled' : ''}></label>
         <label class="field full">
           <span>Đọc đáp án và mã đề từ tệp (.xlsx, .docx, .pdf)</span>
           <input name="keyFile" type="file" accept=".xlsx,.docx,.pdf">
@@ -914,8 +920,9 @@ async function handleSubmit(event) {
     if (form.id === 'exam-form') {
       const key = keyFromForm(form), name = String(f.get('name')).trim(), existingExams = await all('exams'), existing = existingExams.find(x => x.id === form.dataset.id);
       if (!name) throw new Error('Tên đề bắt buộc.');
-      const variants = state.examKeyVariants?.length ? state.examKeyVariants.map(variant => ({ ...variant, key: variant.code === state.activeExamCode ? key : variant.key })) : existing ? [{ code: existing.code, key }] : [];
-      if (!variants.length) throw new Error('Chọn tệp đáp án có mã đề để tạo đề.');
+      const manualCode = String(f.get('examCodeInput') || '').trim();
+      const variants = state.examKeyVariants?.length ? state.examKeyVariants.map(variant => ({ ...variant, key: variant.code === state.activeExamCode ? key : variant.key })) : existing ? [{ code: existing.code, key }] : /^\d{4}$/.test(manualCode) ? [{ code: manualCode, key }] : [];
+      if (!variants.length) throw new Error('Nhập mã đề (4 số) hoặc chọn tệp đáp án có mã đề để tạo đề.');
       if (variants.some(variant => !/^\d{4}$/.test(variant.code) || variant.key.multipleChoice.some(x => x && !['A', 'B', 'C', 'D'].includes(x)) || variant.key.trueFalse.some(x => x !== null && typeof x !== 'boolean') || variant.key.numeric.some(x => x && !/^-?\d+(?:[.,]\d+)?$/.test(x)))) throw new Error('Kiểm tra mã đề và đáp án A–D, Đúng/Sai, số thập phân trong tệp.');
       const pointsFor = variants[0].questionCounts || existing?.questionCounts || { multipleChoice: 40, trueFalse: 8, numeric: 6 };
       const policy = {
@@ -1203,6 +1210,14 @@ function download(text, name, type) {
 
 async function handleChange(event) {
   const input = event.target;
+  if (input.matches('[data-action="select-submission-exam"]')) {
+    const exam = (await all('exams')).find(x => x.id === input.value);
+    if (exam && input.form?.elements.examCode) {
+      input.form.elements.examCode.value = exam.code;
+      notify(`Đã chọn ${exam.name} (Mã ${exam.code}). Bấm Chấm lại để cập nhật điểm.`);
+    }
+    return;
+  }
   if (input.closest('#capture-form') && /^(mc-|tf-|num-)/.test(input.name || '')) refreshCaptureScore(input.form);
   if (input.matches('[name="keyFile"]') && input.files[0]) {
     const preview = root.querySelector('#key-import-preview'); preview.textContent = 'Đang đọc tệp trên thiết bị…'; state.examKeyVariants = null;
