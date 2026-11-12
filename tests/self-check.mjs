@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { FORM, PHOTO_FORM, canonicalDecimal, emptyAnswers, gradeSubmission, hasFormMarkers, parseCSV, rosterRows, scanForm, scanSignature, scoreCSV } from '../core.mjs';
-import { extractAnswerKey, extractAnswerKeyVariants } from '../imports.mjs';
+import { extractAnswerKey, extractAnswerKeyVariants, rosterTemplateXlsx } from '../imports.mjs';
+import { strFromU8, unzipSync } from '../vendor/fflate.js';
 
 assert.equal(extractAnswerKey('MÃ ĐỀ: 1234').code,'1234');
 assert.equal(extractAnswerKey('Mã đề thi số | 0042').code,'0042');
@@ -52,6 +53,10 @@ assert.deepEqual(rows[1],['00000123','Nguyễn, An','12A1']);
 assert.equal(rosterRows(rows)[1].fullName,'Bình "B"');
 assert.deepEqual(rosterRows(parseCSV('\uFEFFSBD;Họ tên;Lớp\r\n')),[]);
 assert.throws(()=>rosterRows(parseCSV('\uFEFFSBD;Lớp\r\n123;12A1')),/SBD và họ tên/);
+assert.equal(rosterRows([['SBD','HỌ VÀ TÊN','','Lớp học'],['26270021','NGUYỄN MINH','ANH','10A1']])[0].fullName,'NGUYỄN MINH ANH');
+assert.equal(rosterRows([['SBD','HỌ VÀ TÊN','','Lớp học'],['26270021','NGUYỄN MINH','ANH','10A1']])[0].className,'10A1');
+const templateZip=unzipSync(rosterTemplateXlsx()),templateSheet=strFromU8(templateZip['xl/worksheets/sheet1.xml']);
+assert.match(templateSheet,/<t>SBD<\/t>/);assert.match(templateSheet,/<t>Họ tên<\/t>/);assert.match(templateSheet,/<t>Lớp<\/t>/);
 assert.match(scoreCSV([{seatNumber:'=2+2',studentName:'An',className:'12A1',examCode:'2025',score:gradeSubmission(key,{...answers},policy),needsReview:true}]),/"'=2\+2"/);
 
 const width=595*FORM.scale,height=842*FORM.scale,gray=new Uint8Array(width*height).fill(255),skew=p=>[1+FORM.scale*(p[0]+0.02*p[1]),2+FORM.scale*(p[1]+0.01*p[0])];
@@ -103,10 +108,10 @@ assert.equal(photoScan.seatNumber,seat);
 assert.equal(photoScan.examCode,code);
 assert.ok(photoScan.answers.multipleChoice.every((value,index)=>value==='ABCD'[index%4]));
 
-const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13'];
+const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
-assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12'].sort());
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13'].sort());
 
 for(const [system,saved,expected] of [['dark',null,'dark'],['light',null,'light'],['dark','light','light']]){
   const document={documentElement:{dataset:{}},querySelector:()=>({setAttribute(name,value){this[name]=value;}})};

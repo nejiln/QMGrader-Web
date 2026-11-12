@@ -19,7 +19,7 @@ PWA mobile-first cho mẫu QM 2025 - CV 1239. App không có backend, tài kho�
 - Sửa đáp án/SBD/mã đề; lưu đáp án nhận dạng ban đầu, đáp án sửa, điểm và ảnh gốc trang phiếu.
 - Chấm Phần II theo từng ý hoặc trọn câu; điểm riêng từng câu; so số thập phân chính xác, gồm số âm.
 - Nhập đáp án XLSX theo nhiều cột mã đề; app tạo từng đề riêng và giữ mã từ tệp. DOCX hỗ trợ bảng đáp án nhiều mã đề; PDF có text hỗ trợ một mã đề có nhãn “Mã đề”.
-- Tải CSV mẫu danh sách với cột `SBD;Họ tên;Lớp`, rồi nhập roster CSV/XLSX; xuất CSV UTF-8 mở được bằng Excel.
+- Tải mẫu CSV hoặc Excel với cột `SBD`, `Họ tên`, `Lớp`, rồi nhập roster. File trường có `HỌ VÀ TÊN` tách hai cột cũng được ghép khi nhập.
 - Cache app cho lần mở offline tiếp theo. Dùng PDF QM 2025 bạn đang có để in phiếu.
 - Giao diện tối theo cài đặt thiết bị; nút trên cùng đổi sáng/tối và nhớ lựa chọn.
 

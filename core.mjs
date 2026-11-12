@@ -94,11 +94,11 @@ export const normalizeHeader = value => String(value).normalize('NFD').replace(/
 export function rosterRows(rows, defaultClass = '') {
   const header = rows[0]?.map(normalizeHeader) || [];
   const seat = header.findIndex(x => ['sbd','sobodanh','masothisinh'].includes(x));
-  const name = header.findIndex(x => ['hoten','tenhocsinh','fullname','name'].includes(x));
-  const classIndex = header.findIndex(x => ['lop','class','classname'].includes(x));
+  const name = header.findIndex(x => ['hoten','hovaten','tenhocsinh','fullname','name'].includes(x));
+  const classIndex = header.findIndex(x => ['lop','lophoc','class','classname'].includes(x));
   if (seat < 0 || name < 0) throw new Error('Không tìm thấy cột SBD và họ tên trong dòng tiêu đề.');
   return rows.slice(1).flatMap(row => {
-    const id = String(row[seat] ?? '').trim(), fullName = String(row[name] ?? '').trim();
+    const id = String(row[seat] ?? '').trim(), fullName = [row[name],header[name]==='hovaten'&&!header[name+1]?row[name+1]:''].map(value=>String(value??'').trim()).filter(Boolean).join(' ');
     if (!id || !fullName) return [];
     const normalizedId = /^\d+$/.test(id) && id.length < 8 ? id.padStart(8, '0') : id;
     return [{id: crypto.randomUUID(), seatNumber: normalizedId, fullName, className: String(row[classIndex] ?? '').trim() || defaultClass.trim()}];
