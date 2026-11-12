@@ -157,7 +157,7 @@ function keyInputs(key,counts={multipleChoice:40,trueFalse:8,numeric:6}){
 function dialogShell(title,body,buttons,formId){
   const submit=`<button class="button" type="submit" ${formId?`form="${esc(formId)}"`:''}>Lưu</button>`;
   const actions=buttons||`<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${submit}`;
-  return `<dialog id="dialog"><div class="dialog-head"><div><p class="eyebrow">QM Chấm · Lưu trên thiết bị</p><h2>${esc(title)}</h2></div><button class="icon-button" type="button" data-action="close-dialog" aria-label="Đóng">×</button></div><div class="dialog-body">${body}</div><div class="dialog-foot">${actions}</div></dialog>`;
+  return `<dialog id="dialog"><div class="dialog-head"><div><p class="eyebrow">QM Chấm · Lưu trên thiết bị</p><h2>${esc(title)}</h2></div><button class="icon-button" type="button" data-action="close-dialog" aria-label="Đóng">×</button></div><div class="dialog-body">${body}<div id="dialog-feedback" class="notice warning" role="alert" hidden></div></div><div class="dialog-foot">${actions}</div></dialog>`;
 }
 function showDialog(title,body,formId,buttons){
   state.modal={title,body,formId,buttons};
@@ -368,7 +368,7 @@ async function handleSubmit(event){
       const pointsFor=variants[0].questionCounts||existing?.questionCounts||{multipleChoice:40,trueFalse:8,numeric:6};
       const policy={multipleChoiceTotal:parseTotal(f.get('multipleChoiceTotal'),'Phần I'),trueFalseTotal:parseTotal(f.get('trueFalseTotal'),'Phần II'),numericTotal:parseTotal(f.get('numericTotal'),'Phần III'),sectionTwoRule:f.get('sectionTwoRule'),multipleChoiceQuestionPoints:parseWeights(String(f.get('weightsMC')),pointsFor.multipleChoice,'Phần I'),trueFalseQuestionPoints:parseWeights(String(f.get('weightsTF')),pointsFor.trueFalse,'Phần II'),numericQuestionPoints:parseWeights(String(f.get('weightsNumeric')),pointsFor.numeric,'Phần III')};
       const baseName=name.replace(/\s·\s\d{4}$/,''),now=Date.now(),exams=variants.map(variant=>{
-        const examName=variants.length>1?`${baseName} · ${variant.code}`:name,previous=existingExams.find(x=>x.code===variant.code&&x.name===examName)||(variants.length===1&&existing?.code===variant.code?existing:null),counts=keyCounts(variant.key);
+        const examName=variants.length>1?`${baseName} · ${variant.code}`:name,previous=existingExams.find(x=>x.code===variant.code)||(variants.length===1&&existing?.code===variant.code?existing:null),counts=keyCounts(variant.key);
         return {id:previous?.id||crypto.randomUUID(),name:examName,code:variant.code,answerKey:variant.key,questionCounts:variant.questionCounts||previous?.questionCounts||{multipleChoice:counts[0],trueFalse:Math.ceil(counts[1]/4),numeric:counts[2]},policy,createdAt:previous?.createdAt||now,updatedAt:now};
       });
       if(exams.some(item=>existingExams.some(old=>old.id!==item.id&&old.code===item.code)))throw new Error('Mã đề đã tồn tại với tên khác. Mở đề đó để cập nhật, tránh tạo bản trùng.');
@@ -414,7 +414,7 @@ async function handleSubmit(event){
       for(const item of rows){const key=`${item.className}\u0000${item.seatNumber}`;if(seen.has(key)){duplicates++;continue;}seen.add(key);fresh.push(item);}
       for(const item of fresh)await save('roster',item);closeDialog();state.importDraft=null;state.view='roster';await render();notify(`Đã thêm ${fresh.length} học sinh${duplicates?`; bỏ qua ${duplicates} SBD trùng`:''}.`);
     }
-  }catch(error){notify(error.message||'Không lưu được.');}
+  }catch(error){const message=error.message||'Không lưu được.',feedback=root.querySelector('#dialog-feedback');if(feedback){feedback.textContent=message;feedback.hidden=false;feedback.scrollIntoView({block:'nearest'});}else notify(message);}
 }
 
 async function handleClick(event){
