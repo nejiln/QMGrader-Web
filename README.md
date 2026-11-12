@@ -7,13 +7,14 @@ PWA mobile-first cho mẫu QM 2025 - CV 1239. App không có backend, tài kho�
 1. Mở URL HTTPS bằng Safari.
 2. Chọn **Chia sẻ → Thêm vào Màn hình chính**.
 3. Tạo đề và điểm; nhập roster CSV/XLSX nếu có.
-4. Mở đợt theo lớp, chụp hai trang phiếu, sửa mục bị cảnh báo, rồi lưu.
-5. Rà ảnh gốc và chọn **Chốt điểm** trước khi xuất CSV.
+4. Mở đợt theo lớp, chọn **Quét tự động bằng camera**; giữ trọn trang 1 trong khung đến khi điểm hiện.
+5. Thêm trang 2 nếu cần lưu ảnh tự luận, rà cảnh báo, rồi lưu bài.
+6. Rà ảnh gốc và chọn **Chốt điểm** trước khi xuất CSV.
 
 ## Tính năng
 
 - Scan OMR tại chỗ: SBD 8 chữ số, mã đề 4 chữ số, 40 câu A–D, 32 ý Đúng/Sai, 6 câu số.
-- Mở camera từ iPhone, xoay ảnh tự động, dò mốc đen và tính điểm sau khi chụp.
+- Quét camera trực tiếp trên iPhone: tự nhận phiếu ổn định, đọc SBD/mã đề và hiện điểm trước khi lưu.
 - Báo ô mờ, ô bỏ trống, tô nhiều, thiếu trang, SBD không khớp, SBD trùng, mã đề lệch.
 - Sửa đáp án/SBD/mã đề; lưu đáp án nhận dạng ban đầu, đáp án sửa, điểm và hai ảnh gốc.
 - Chấm Phần II theo từng ý hoặc trọn câu; điểm riêng từng câu; so số thập phân chính xác, gồm số âm.

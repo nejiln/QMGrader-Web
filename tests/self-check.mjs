@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { FORM, canonicalDecimal, emptyAnswers, gradeSubmission, parseCSV, rosterRows, scanForm, scoreCSV } from '../core.mjs';
+import { FORM, canonicalDecimal, emptyAnswers, gradeSubmission, hasFormMarkers, parseCSV, rosterRows, scanForm, scanSignature, scoreCSV } from '../core.mjs';
 
 assert.equal(canonicalDecimal('-001,2500'), '-1.25');
 assert.equal(canonicalDecimal('-0.000'), '0');
@@ -40,6 +40,15 @@ assert.ok(scan.answers.multipleChoice.every((value,index)=>value==='ABCD'[index%
 assert.ok(scan.answers.trueFalse.every((value,index)=>value===(index%4===0)));
 assert.ok(scan.answers.numeric.every(value=>value==='-1.25'));
 assert.equal(scan.answers.reviewItems.length,0);
+const liveScale=2,liveWidth=FORM.pageWidth*liveScale,liveHeight=FORM.pageHeight*liveScale,liveGray=new Uint8Array(liveWidth*liveHeight);
+for(let y=0;y<liveHeight;y++)for(let x=0;x<liveWidth;x++)liveGray[y*liveWidth+x]=gray[Math.floor(y*FORM.scale/liveScale)*width+Math.floor(x*FORM.scale/liveScale)];
+assert.equal(hasFormMarkers(liveGray,liveWidth,liveHeight,liveScale),true);
+const liveScan=scanForm(liveGray,liveWidth,liveHeight,2,liveScale);
+assert.equal(liveScan.seatNumber,seat);
+assert.equal(liveScan.examCode,code);
+assert.equal(scanSignature(liveScan),scanSignature(scan));
+const changedScan={...liveScan,answers:{...liveScan.answers,multipleChoice:liveScan.answers.multipleChoice.slice()}};changedScan.answers.multipleChoice[0]='B';
+assert.notEqual(scanSignature(changedScan),scanSignature(liveScan));
 
 const uncertain=new Uint8Array(gray);const q=0,xy=skew([FORM.mcColumns[0][1],FORM.mcRows[0]]);for(let y=Math.floor(xy[1]-10);y<=xy[1]+10;y++)for(let x=Math.floor(xy[0]-10);x<=xy[0]+10;x++)if(x>=0&&y>=0&&x<width&&y<height)uncertain[y*width+x]=185;
 const flagged=scanForm(uncertain,width,height,1);
@@ -47,10 +56,10 @@ assert.equal(flagged.answers.multipleChoice[q],null);
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('I-1')));
 assert.ok(flagged.answers.reviewItems.some(item=>item.includes('đủ 2 trang')));
 
-const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7'];
+const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
-assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6'].sort());
+assert.deepEqual(deletedCaches.sort(),['qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7'].sort());
 
 for(const [system,saved,expected] of [['dark',null,'dark'],['light',null,'light'],['dark','light','light']]){
   const document={documentElement:{dataset:{}},querySelector:()=>({setAttribute(name,value){this[name]=value;}})};

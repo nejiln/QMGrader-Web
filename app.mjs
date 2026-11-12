@@ -1,8 +1,8 @@
-import { gradeSubmission, emptyAnswers, scoreCSV, scanForm } from './core.mjs';
+import { FORM, gradeSubmission, emptyAnswers, scoreCSV, scanForm, hasFormMarkers, scanSignature } from './core.mjs';
 import { extractAnswerKey, importRosterFile, readDocument } from './imports.mjs';
 
 const root=document.querySelector('#app'),toastBox=document.querySelector('#toast');
-let db,toastTimer,objectURLs=[];
+let db,toastTimer,objectURLs=[],cameraStream,cameraTimer,cameraBusy=false,cameraSession=0;
 const state={view:'batches',batchId:null,modal:null,captureDraft:null,reviewDraft:null,importDraft:null};
 const pageLabels={batches:'Đợt chấm',batch:'Danh sách đợt','batch-detail':'Bài chấm',submission:'Phiếu chấm',exams:'Đề thi',roster:'Danh sách lớp'};
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -160,14 +160,17 @@ function dialogShell(title,body,buttons,formId){
 function showDialog(title,body,formId,buttons){
   state.modal={title,body,formId,buttons};
   root.insertAdjacentHTML('beforeend',dialogShell(title,body,buttons,formId));
-  const dialog=root.querySelector('#dialog');dialog.addEventListener('click',event=>{if(event.target===dialog)closeDialog();});dialog.showModal();
+  const dialog=root.querySelector('#dialog');dialog.addEventListener('click',event=>{if(event.target===dialog)closeDialog();});dialog.addEventListener('close',()=>{if(root.querySelector('#dialog')===dialog){stopCamera();state.modal=null;state.captureDraft=null;state.importDraft=null;dialog.remove();}});dialog.showModal();
 }
 function updateDialog(body){
   const dialog=root.querySelector('#dialog');if(!dialog)return;
   const open=dialog.open;dialog.querySelector('.dialog-body').innerHTML=body;
   if(open&&!dialog.open)dialog.showModal();
 }
-function closeDialog(){state.modal=null;state.captureDraft=null;state.importDraft=null;root.querySelector('#dialog')?.close();root.querySelector('#dialog')?.remove();}
+function closeDialog(){stopCamera();state.modal=null;state.captureDraft=null;state.importDraft=null;root.querySelector('#dialog')?.close();root.querySelector('#dialog')?.remove();}
+function setCameraStatus(message){if(state.captureDraft)state.captureDraft.cameraStatus=message;const status=root.querySelector('#camera-status');if(status){status.textContent=message;status.hidden=false;}}
+function stopCamera(){cameraSession++;clearTimeout(cameraTimer);cameraTimer=null;cameraStream?.getTracks().forEach(track=>track.stop());cameraStream=null;cameraBusy=false;disableCaptureFields(false);const video=root.querySelector('#scan-camera');if(video){video.pause();video.srcObject=null;}const live=root.querySelector('#live-camera');if(live)live.hidden=true;const start=root.querySelector('[data-action="start-camera"]'),stop=root.querySelector('[data-action="stop-camera"]');if(start){start.hidden=false;start.disabled=false;}if(stop)stop.hidden=true;setCameraStatus(state.captureDraft?.cameraStable?'Đã quét ổn định. Điểm tạm tính đã hiện.':'Đã dừng camera. Quét lại để xác nhận.');}
+function disableCaptureFields(disabled){root.querySelectorAll('#capture-form input:not([type="file"]),#capture-form select,#capture-form textarea').forEach(field=>field.disabled=disabled);}
 
 async function newBatchDialog(){
   const {exams}=await localState();
@@ -183,19 +186,26 @@ function examDialog(exam){
 
 function captureDialog(batch,data){
   const exam=data.exams.find(e=>e.id===batch.examId);
-  const draft={batchId:batch.id,examId:batch.examId,className:batch.className,seatNumber:'',examCode:exam?.code||'',firstPage:null,secondPage:null,scanResult:null,examKey:exam?.answerKey||{},policy:exam?policyFor(exam):{},photoNames:{},studentName:'',confirmed:false};
+  const draft={batchId:batch.id,examId:batch.examId,className:batch.className,seatNumber:'',examCode:exam?.code||'',expectedExamCode:exam?.code||'',firstPage:null,secondPage:null,scanResult:null,examKey:exam?.answerKey||{},policy:exam?policyFor(exam):{},photoNames:{},studentName:'',confirmed:false};
   state.captureDraft=draft;
   captureDialogContent(draft,data);
 }
 function captureDialogContent(draft,data){
   const exam=data.exams.find(e=>e.id===draft.examId),matches=data.roster.filter(x=>x.className===draft.className&&x.seatNumber===draft.seatNumber);
-  const warning=matches.length>1?`<div class="notice warning"><span>!</span><div><strong>SBD trùng trong ${esc(draft.className)}</strong><p>Sửa danh sách lớp trước khi ghép tên. Bài vẫn lưu để rà soát.</p></div></div>`:draft.seatNumber&&matches.length===0?`<div class="notice warning"><span>!</span><div><strong>Chưa có SBD này trong lớp</strong><p>Tên sẽ để trống. Có thể ghép sau trong danh sách lớp.</p></div></div>`:'';
-  const review=draft.scanResult?.answers?.reviewItems||[];
-  const result=draft.scanResult?`<div class="score-strip">${[['Phần I',draft.score?.multipleChoiceEarned,draft.score?.multipleChoicePossible],['Phần II',draft.score?.trueFalseEarned,draft.score?.trueFalsePossible],['Phần III',draft.score?.numericEarned,draft.score?.numericPossible],['Tổng',draft.score?.totalEarned,draft.score?.totalPossible]].map(([name,earned,total])=>`<div class="score-chip"><span>${name}</span><strong>${fmt(earned)} / ${fmt(total)}</strong></div>`).join('')}</div><div class="notice ${review.length?'warning':''}"><span>${review.length?'!':'✓'}</span><div><strong>${review.length?`${review.length} mục cần nhìn lại`:'Phiếu đã nhận dạng'}</strong><p>Kiểm tra kết quả trước khi lưu. Bạn có thể sửa mọi đáp án ngay sau đó.</p>${review.length?`<ul class="warning-list">${review.slice(0,8).map(x=>`<li>${esc(x)}</li>`).join('')}${review.length>8?`<li>… còn ${review.length-8} mục</li>`:''}</ul>`:''}</div></div>`:'';
-  const body=`<form id="capture-form"><input type="hidden" name="batchId" value="${esc(batch.id)}"><div class="form-grid"><label class="field"><span>Số báo danh · 8 số</span><input name="seatNumber" inputmode="numeric" maxlength="8" value="${esc(draft.seatNumber)}" placeholder="Đọc tự động sau khi chụp"></label><label class="field"><span>Mã đề · 4 số</span><input name="examCode" inputmode="numeric" maxlength="4" value="${esc(draft.examCode)}"></label></div>${warning}<div class="capture-pair">${captureSlot(1,draft.firstPage)}${captureSlot(2,draft.secondPage)}</div><label class="field"><span>Nhập phiếu PDF thay vì chụp</span><input type="file" data-pdf accept="application/pdf,.pdf"><small>Đọc trang 1–2 ngay trên thiết bị. PDF scan vẫn cần ảnh rõ mốc căn chỉnh.</small></label>${result}<details class="card answer-card" ${draft.scanResult?'':'open'}><summary>${draft.scanResult?'Sửa đáp án trước khi lưu':'Nhập đáp án thủ công'}</summary>${answerEditor(draft.scanResult?.answers||emptyAnswers())}</details><p class="helper">${esc(exam?.name||'')} · ảnh phiếu lưu trên iPhone này. Trang sau được lưu làm bằng chứng, không OCR phần tự luận.</p></form>`;
-  const buttons=`<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${!draft.scanResult?'<button class="button quiet" type="button" data-action="manual-entry">Nhập tay</button>':''}<button class="button" type="submit" form="capture-form" ${draft.scanResult?'':'disabled'}>Lưu bài chấm</button>`;
+  const warning=matches.length>1?`<div class="notice warning"><span>!</span><div><strong>SBD trùng trong ${esc(draft.className)}</strong><p>Sửa danh sách lớp trước khi ghép tên. Bài vẫn lưu để rà soát.</p></div></div>`:draft.seatNumber&&matches.length===0?`<div class="notice warning"><span>!</span><div><strong>Chưa có SBD này trong lớp</strong><p>Tên sẽ để trống. Có thể ghép sau trong danh sách lớp.</p></div></div>`:draft.examCode&&draft.expectedExamCode&&draft.examCode!==draft.expectedExamCode?`<div class="notice warning"><span>!</span><div><strong>Mã đọc được ${esc(draft.examCode)} khác mã đề đã chọn ${esc(draft.expectedExamCode)}</strong><p>Đối chiếu mã đề trước khi lưu điểm.</p></div></div>`:'';
+  const result=captureResultMarkup(draft);
+  const scanner=`<div class="camera-actions"><button class="button secondary" type="button" data-action="start-camera" ${cameraStream?'hidden':''}>Quét tự động bằng camera</button><button class="button quiet" type="button" data-action="stop-camera" ${cameraStream?'':'hidden'}>Dừng camera</button></div><div id="live-camera" class="live-camera" ${cameraStream?'':'hidden'}><video id="scan-camera" autoplay muted playsinline aria-label="Khung quét phiếu"></video><span class="camera-frame" aria-hidden="true"></span></div><p id="camera-status" class="helper" role="status" ${cameraStream||draft.cameraStatus?'':'hidden'}>${esc(draft.cameraStatus||'Đưa đủ bốn mốc đen trang 1 vào khung, giữ yên để app tự quét.')}</p>`;
+  const body=`<form id="capture-form"><input type="hidden" name="batchId" value="${esc(batch.id)}"><div class="form-grid"><label class="field"><span>Số báo danh · 8 số</span><input name="seatNumber" inputmode="numeric" maxlength="8" value="${esc(draft.seatNumber)}" placeholder="Đọc tự động từ phiếu"></label><label class="field"><span>Mã đề · 4 số</span><input name="examCode" inputmode="numeric" maxlength="4" value="${esc(draft.examCode)}"></label></div>${scanner}${warning}<div id="capture-result">${result}</div><div class="capture-pair">${captureSlot(1,draft.firstPage)}${captureSlot(2,draft.secondPage)}</div><label class="field"><span>Nhập phiếu PDF thay vì chụp</span><input type="file" data-pdf accept="application/pdf,.pdf"><small>Đọc trang 1–2 ngay trên thiết bị. PDF scan vẫn cần ảnh rõ mốc căn chỉnh.</small></label><details class="card answer-card" ${draft.scanResult?'':'open'}><summary>${draft.scanResult?'Sửa đáp án trước khi lưu':'Nhập đáp án thủ công'}</summary>${answerEditor(draft.scanResult?.answers||emptyAnswers())}</details><p class="helper">${esc(exam?.name||'')} · ảnh phiếu lưu trên iPhone này. Trang sau được lưu làm bằng chứng, không OCR phần tự luận.</p></form>`;
+  const canSave=draft.scanResult&&(!draft.cameraUsed||draft.cameraStable||draft.cameraAccepted),buttons=`<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${!draft.scanResult?'<button class="button quiet" type="button" data-action="manual-entry">Nhập tay</button>':''}<button class="button" type="submit" form="capture-form" ${canSave?'':'disabled'}>Lưu bài chấm</button>`;
   if(state.modal){state.modal.body=body;state.modal.buttons=buttons;updateDialog(body);const foot=root.querySelector('.dialog-foot');if(foot)foot.innerHTML=buttons;}
   else showDialog('Quét phiếu',body,'capture-form',buttons);
+}
+function captureResultMarkup(draft){
+  if(!draft.scanResult)return '';
+  const score=draft.score||{},review=[...(draft.scanResult.answers.reviewItems||[])],ready=draft.cameraStable||draft.cameraAccepted||!draft.cameraUsed;
+  if(draft.cameraAccepted&&!draft.cameraStable)review.push('Chỉ nhận dạng được một khung hình; kiểm tra kỹ');
+  if(draft.cameraUsed&&ready&&draft.firstPage&&!draft.secondPage)review.push('Trang 2 chưa được lưu');
+  return `<div class="score-strip">${[['Phần I',score.multipleChoiceEarned,score.multipleChoicePossible],['Phần II',score.trueFalseEarned,score.trueFalsePossible],['Phần III',score.numericEarned,score.numericPossible],['Tổng',score.totalEarned,score.totalPossible]].map(([name,earned,total])=>`<div class="score-chip"><span>${name}</span><strong>${fmt(earned)} / ${fmt(total)}</strong></div>`).join('')}</div><div class="notice ${review.length||!ready?'warning':''}"><span>${review.length||!ready?'!':'✓'}</span><div><strong>${!ready?'Điểm tạm tính · đang xác nhận':review.length?`${review.length} mục cần nhìn lại`:'Phiếu đã nhận dạng'}</strong><p>${ready?'Kiểm tra ô được đánh dấu trước khi lưu. Bạn có thể sửa đáp án.':'Giữ phiếu yên để app xác nhận rồi chốt điểm.'}</p>${review.length?`<ul class="warning-list">${review.slice(0,8).map(x=>`<li>${esc(x)}</li>`).join('')}${review.length>8?`<li>… còn ${review.length-8} mục</li>`:''}</ul>`:''}</div></div>`;
 }
 function captureSlot(number,blob){return `<label class="capture-slot"><strong>Trang ${number}${number===1?' · đáp án và SBD':' · trang sau'}</strong><input type="file" data-photo="${number}" accept="image/*" capture="environment"><small class="helper">Chụp trọn phiếu, đặt bốn ô đen ở bốn góc trong khung hình.</small>${blob?`<img alt="Ảnh phiếu trang ${number}" src="${photoURL(blob)}">`:''}</label>`;}
 
@@ -207,8 +217,8 @@ async function imageBlob(file){
   const context=canvas.getContext('2d',{alpha:false});context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Không giữ được ảnh trên thiết bị.')),'image/jpeg',0.9));
 }
-async function rasterize(bitmap,rotation){
-  const width=1785,height=2526,canvas=document.createElement('canvas'),landscape=rotation%2===1;
+async function rasterize(bitmap,rotation,scale=FORM.scale){
+  const width=FORM.pageWidth*scale,height=FORM.pageHeight*scale,canvas=document.createElement('canvas'),landscape=rotation%2===1;
   canvas.width=width;canvas.height=height;
   const context=canvas.getContext('2d',{willReadFrequently:true});context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);
   const drawWidth=landscape?height:width,drawHeight=landscape?width:height;
@@ -217,15 +227,89 @@ async function rasterize(bitmap,rotation){
   for(let i=0,j=0;i<gray.length;i++,j+=4)gray[i]=Math.round(.299*rgba[j]+.587*rgba[j+1]+.114*rgba[j+2]);
   return {gray,width,height};
 }
-async function scanPhoto(blob,pageCount=2){
+async function scanPhoto(blob,pageCount=2,scale=FORM.scale){
   const bitmap=await createImageBitmap(blob,{imageOrientation:'from-image'});
   let result=null;
   try{for(let rotation=0;rotation<4;rotation++){
-    const raster=await rasterize(bitmap,rotation),candidate=scanForm(raster.gray,raster.width,raster.height,pageCount);
+    const raster=await rasterize(bitmap,rotation,scale),candidate=scanForm(raster.gray,raster.width,raster.height,pageCount,scale);
     if(!candidate.answers.reviewItems.includes('Không nhận diện được phiếu hoặc mốc căn chỉnh')&&!candidate.answers.reviewItems.includes('Tỷ lệ ảnh khác mẫu QM 2025')){result=candidate;break;}
   }}finally{bitmap.close();}
   if(!result)result=scanForm(new Uint8Array(),0,pageCount);
   return result;
+}
+function cameraFrame(video){
+  if(!video.videoWidth||!video.videoHeight)return Promise.resolve(null);
+  const ratio=FORM.pageWidth/FORM.pageHeight,sourceRatio=video.videoWidth/video.videoHeight;
+  const width=Math.round(sourceRatio>ratio?video.videoHeight*ratio:video.videoWidth),height=Math.round(sourceRatio>ratio?video.videoHeight:video.videoWidth/ratio),x=Math.round((video.videoWidth-width)/2),y=Math.round((video.videoHeight-height)/2),canvas=document.createElement('canvas');
+  canvas.width=width;canvas.height=height;canvas.getContext('2d',{alpha:false}).drawImage(video,x,y,width,height,0,0,width,height);
+  return new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.9));
+}
+async function scanCameraFrame(video,stable={signature:'',count:0},session=cameraSession){
+  if(!cameraStream||session!==cameraSession)return;
+  if(cameraBusy||video.readyState<2){cameraTimer=setTimeout(()=>scanCameraFrame(video,stable,session),350);return;}
+  cameraBusy=true;
+  try{
+    const photo=await cameraFrame(video);if(!photo)throw new Error('Đang mở camera.');
+    const bitmap=await createImageBitmap(photo);
+    let scan=null,mismatchCode='';
+    try{
+      for(const rotation of [0,2,1,3]){
+        const quick=await rasterize(bitmap,rotation,1);
+        if(!hasFormMarkers(quick.gray,quick.width,quick.height,1))continue;
+        const full=await rasterize(bitmap,rotation);
+        const candidate=scanForm(full.gray,full.width,full.height,1);candidate.answers.reviewItems=candidate.answers.reviewItems.filter(message=>!message.startsWith('Cần quét đủ 2 trang'));
+        if(/^\d{8}$/.test(candidate.seatNumber)&&/^\d{4}$/.test(candidate.examCode)){
+          if(candidate.examCode===state.captureDraft?.expectedExamCode){scan=candidate;break;}
+          mismatchCode=candidate.examCode;
+        }
+      }
+    }finally{bitmap.close();}
+    if(session!==cameraSession)return;
+    if(scan){
+      const signature=scanSignature(scan);stable.count=signature===stable.signature?stable.count+1:1;stable.signature=signature;
+      const draft=state.captureDraft;if(!draft)return;
+      draft.firstPage=photo;draft.scanPage=photo;draft.scanResult=scan;draft.score=gradeSubmission(draft.examKey||{},scan.answers,draft.policy||{});draft.seatNumber=scan.seatNumber;draft.examCode=scan.examCode;draft.cameraUsed=true;draft.cameraStable=stable.count>=2;
+      const form=root.querySelector('#capture-form');
+      if(form){form.elements.seatNumber.value=scan.seatNumber;form.elements.examCode.value=scan.examCode;for(let i=0;i<40;i++)form.elements[`mc-${i}`].value=scan.answers.multipleChoice[i]||'';for(let i=0;i<32;i++)form.elements[`tf-${i}`].value=scan.answers.trueFalse[i]==null?'':String(scan.answers.trueFalse[i]);for(let i=0;i<6;i++)form.elements[`num-${i}`].value=scan.answers.numeric[i]||'';}
+      const result=root.querySelector('#capture-result');if(result)result.innerHTML=captureResultMarkup(draft);
+      const save=root.querySelector('button[type="submit"][form="capture-form"]');if(save)save.disabled=stable.count<2;
+      setCameraStatus(stable.count>1?'Đã nhận phiếu ổn định. Điểm đã hiện.':'Đã đọc SBD. Điểm tạm tính đã hiện; giữ phiếu yên.');
+      if(stable.count>=2){
+        draft.manual=false;
+        const data=await localState(),exam=data.exams.find(x=>x.id===draft.examId);draft.examKey=exam?.answerKey||{};draft.policy=exam?policyFor(exam):{};draft.score=exam?scoreFor(exam,scan.answers):null;draft.seatNumber=scan.seatNumber;draft.examCode=scan.examCode;
+        stopCamera();captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},data);notify('Đã tự quét phiếu. Điểm tạm tính đã hiện.');return;
+      }
+    }else{
+      stable.signature='';stable.count=0;
+      const draft=state.captureDraft;draft.cameraStable=false;draft.cameraUsed=true;draft.scanResult=null;draft.score=null;
+      const result=root.querySelector('#capture-result');if(result)result.innerHTML='';const save=root.querySelector('button[type="submit"][form="capture-form"]');if(save)save.disabled=true;
+      setCameraStatus(mismatchCode?`Mã phiếu ${mismatchCode} khác mã đề đã chọn (${draft.expectedExamCode}).`:'Đưa đủ bốn mốc đen vào khung, rồi giữ phiếu yên.');
+    }
+  }catch(error){setCameraStatus(error.message||'Không đọc được khung hình. Căn lại phiếu.');}
+  finally{if(session===cameraSession)cameraBusy=false;}
+  if(cameraStream&&session===cameraSession)cameraTimer=setTimeout(()=>scanCameraFrame(video,stable,session),350);
+}
+async function startCamera(){
+  if(!navigator.mediaDevices?.getUserMedia)throw new Error('Trình duyệt không hỗ trợ camera trực tiếp. Dùng nút chọn ảnh bên dưới.');
+  const start=root.querySelector('[data-action="start-camera"]');if(start)start.disabled=true;
+  const session=++cameraSession;let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:2560}},audio:false});
+    if(session!==cameraSession){stream.getTracks().forEach(track=>track.stop());return;}
+    cameraStream=stream;
+    const draft=state.captureDraft;if(!draft){stopCamera();return;}
+    draft.cameraUsed=true;draft.cameraStable=false;draft.cameraAccepted=false;
+    disableCaptureFields(true);
+    const live=root.querySelector('#live-camera'),start=root.querySelector('[data-action="start-camera"]'),stop=root.querySelector('[data-action="stop-camera"]'),status=root.querySelector('#camera-status');if(live)live.hidden=false;if(start)start.hidden=true;if(stop)stop.hidden=false;if(status)status.hidden=false;
+    const result=root.querySelector('#capture-result');if(result)result.innerHTML=captureResultMarkup(draft);const save=root.querySelector('button[type="submit"][form="capture-form"]');if(save)save.disabled=true;
+    setCameraStatus('Đang tìm phiếu. Đưa đủ bốn mốc vào khung.');const video=root.querySelector('#scan-camera');if(!video)throw new Error('Không mở được khung camera.');
+    video.srcObject=stream;await video.play();if(session!==cameraSession)return;
+    scanCameraFrame(video,{signature:'',count:0},session);
+  }catch(error){
+    if(session===cameraSession)stopCamera();
+    const message=error.name==='NotAllowedError'?'Safari chưa được cấp quyền camera. Bật quyền Camera cho trang web rồi thử lại.':error.name==='NotFoundError'?'Không tìm thấy camera trên thiết bị.':'Không mở được camera. Dùng Safari qua HTTPS hoặc chọn ảnh bên dưới.';setCameraStatus(message);
+    throw new Error(message);
+  }
 }
 
 function answersFromForm(form){
@@ -276,6 +360,7 @@ async function handleSubmit(event){
     }
     if(form.id==='capture-form'){
       const draft=state.captureDraft;if((!draft?.firstPage&&!draft?.manual)||!draft.scanResult)throw new Error('Chụp trang trước của phiếu rồi kiểm tra nhận dạng.');
+      if(draft.cameraUsed&&!draft.cameraStable&&!draft.cameraAccepted)throw new Error('Giữ phiếu yên để camera xác nhận, hoặc dừng quét để rà thủ công.');
       const batch=(await all('batches')).find(x=>x.id===draft.batchId),exam=(await all('exams')).find(x=>x.id===draft.examId);
       if(!batch||!exam)throw new Error('Không còn đợt chấm hoặc đề thi.');
       const count=(await all('submissions')).filter(x=>x.batchId===batch.id).length;if(count>=100)throw new Error('Đợt chấm đã đủ 100 bài.');
@@ -331,8 +416,15 @@ async function handleClick(event){
       const data=await localState(),batch=data.batches.find(x=>x.id===target.dataset.id);if(!batch)throw new Error('Không tìm thấy đợt chấm.');
       const current=data.submissions.filter(x=>x.batchId===batch.id).length;if(current>=100)throw new Error('Đợt chấm đã đủ 100 bài.');captureDialog(batch,data);
     }
+    if(action==='start-camera')await startCamera();
+    if(action==='stop-camera'){
+      const draft=state.captureDraft;stopCamera();
+      if(draft?.scanResult){draft.cameraUsed=false;draft.cameraAccepted=true;draft.cameraStatus='Đã dừng quét. Kiểm tra điểm và cảnh báo trước khi lưu.';captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},await localState());notify('Đã dừng quét. Kiểm tra phiếu trước khi lưu.');}
+    }
     if(action==='manual-entry'){
+      stopCamera();
       const draft=state.captureDraft;if(!draft)throw new Error('Phiếu chưa sẵn sàng.');
+      draft.cameraUsed=false;draft.cameraStable=false;draft.cameraStatus='';
       const answers=emptyAnswers();answers.reviewItems=['Nhập tay: chưa lưu ảnh gốc'];
       draft.scanResult={seatNumber:draft.seatNumber,examCode:draft.examCode,answers};draft.manual=true;
       const data=await localState(),exam=data.exams.find(x=>x.id===draft.examId);draft.score=exam?scoreFor(exam,answers):null;
@@ -386,20 +478,21 @@ async function handleChange(event){
   if(input.matches('[data-pdf]')&&input.files[0])await handlePdf(input);
 }
 async function handlePhoto(input){
-  const draft=state.captureDraft,number=Number(input.dataset.photo);if(!draft)return;
-  const form=input.form,f=new FormData(form);draft.seatNumber=String(f.get('seatNumber')||'');draft.examCode=String(f.get('examCode')||'');
-  const formAnswers=answersFromForm(form);try{
+  stopCamera();
+  const draft=state.captureDraft,number=Number(input.dataset.photo);if(!draft)return;draft.cameraUsed=false;draft.cameraStable=false;draft.cameraStatus='';
+  const form=input.form,f=new FormData(form),preserveAnswers=number===2&&!!draft.scanResult,formAnswers=preserveAnswers&&!form.elements['mc-0'].disabled?answersFromForm(form):null;
+  if(!form.elements.seatNumber.disabled)draft.seatNumber=String(f.get('seatNumber')||'');if(!form.elements.examCode.disabled)draft.examCode=String(f.get('examCode')||'');try{
     notify(`Đang đọc trang ${number}…`);
     const original=input.files[0],photo=await imageBlob(original);
     if(number===1){draft.firstPage=original;draft.scanPage=photo;draft.manual=false;}else draft.secondPage=original;
     if(draft.scanPage)draft.scanResult=await scanPhoto(draft.scanPage,draft.secondPage?2:1);
-    if(draft.scanResult&&!draft.manual){const data=await localState(),exam=data.exams.find(x=>x.id===draft.examId);draft.examKey=exam?.answerKey||{};draft.policy=exam?policyFor(exam):{};draft.score=exam?scoreFor(exam,draft.scanResult.answers):null;draft.seatNumber=draft.scanResult.seatNumber||draft.seatNumber;draft.examCode=draft.scanResult.examCode||draft.examCode;}
-    if(draft.scanResult&&!draft.manual&&form.elements['mc-0']){for(let i=0;i<40;i++)draft.scanResult.answers.multipleChoice[i]=formAnswers.multipleChoice[i];for(let i=0;i<32;i++)draft.scanResult.answers.trueFalse[i]=formAnswers.trueFalse[i];for(let i=0;i<6;i++)draft.scanResult.answers.numeric[i]=formAnswers.numeric[i];}
+    if(draft.scanResult&&!draft.manual){const data=await localState(),exam=data.exams.find(x=>x.id===draft.examId);draft.examKey=exam?.answerKey||{};draft.policy=exam?policyFor(exam):{};if(formAnswers){draft.scanResult.answers.multipleChoice=formAnswers.multipleChoice;draft.scanResult.answers.trueFalse=formAnswers.trueFalse;draft.scanResult.answers.numeric=formAnswers.numeric;}draft.score=exam?scoreFor(exam,draft.scanResult.answers):null;if(number===1){draft.seatNumber=draft.scanResult.seatNumber||draft.seatNumber;draft.examCode=draft.scanResult.examCode||draft.examCode;}}
     captureDialogContent({id:draft.batchId,examId:draft.examId,className:draft.className},await localState());notify(number===1?'Đã đọc phiếu. Kiểm tra ô được đánh dấu.':'Đã giữ ảnh trang sau trên iPhone.');
   }catch(error){notify(error.message||'Không xử lý được ảnh.');}
 }
 async function handlePdf(input){
-  const draft=state.captureDraft;if(!draft)return;
+  stopCamera();
+  const draft=state.captureDraft;if(!draft)return;draft.cameraUsed=false;draft.cameraStable=false;draft.cameraStatus='';
   try{
     notify('Đang dựng hai trang PDF trên thiết bị…');
     const {renderPdfPages}=await import('./imports.mjs'),pages=await renderPdfPages(input.files[0]);
@@ -433,6 +526,7 @@ async function boot(){
   try{db=await openDatabase();await render();navigator.storage?.persist?.().catch(()=>{});}
   catch(error){root.innerHTML=`<main><div class="notice error"><span>!</span><div><strong>Không mở được kho dữ liệu trên iPhone</strong><p>${esc(error.message||'Bật IndexedDB trong cài đặt Safari, rồi mở lại app.')}</p></div></div></main>`;}
   root.addEventListener('click',event=>handleClick(event));root.addEventListener('submit',event=>handleSubmit(event));root.addEventListener('change',event=>handleChange(event));root.addEventListener('input',event=>handleInput(event));root.addEventListener('focusout',event=>handleFocusOut(event));
+  document.addEventListener('visibilitychange',()=>{if(document.hidden&&cameraStream)stopCamera();});
   addEventListener('online',render);addEventListener('offline',render);
 }
 boot();

@@ -93,17 +93,17 @@ export function rosterRows(rows, defaultClass = '') {
   });
 }
 
-const markerMap = (point, observed) => {
+const markerMap = (point, observed, scale=FORM.scale) => {
   // shortcut: bilinear markers do not correct strong perspective, upgrade to a projective homography when real-paper checks need it.
   const [x0,y0]=FORM.markers[0],y1=FORM.markers[2][1];
   const u=(point[0]-x0)/(FORM.markers[1][0]-x0), v=(point[1]-y0)/(y1-y0);
   const top=[observed[0][0]+(observed[1][0]-observed[0][0])*u,observed[0][1]+(observed[1][1]-observed[0][1])*u];
   const bottom=[observed[2][0]+(observed[3][0]-observed[2][0])*u,observed[2][1]+(observed[3][1]-observed[2][1])*u];
-  return [(top[0]+(bottom[0]-top[0])*v)*FORM.scale,(top[1]+(bottom[1]-top[1])*v)*FORM.scale];
+  return [(top[0]+(bottom[0]-top[0])*v)*scale,(top[1]+(bottom[1]-top[1])*v)*scale];
 };
 
-function findMarker(pixels,width,height,center,minSize=10) {
-  const s=FORM.scale, expectedX=center[0]*s, expectedY=center[1]*s, radius=70*s;
+function findMarker(pixels,width,height,center,minSize=10,scale=FORM.scale) {
+  const s=scale, expectedX=center[0]*s, expectedY=center[1]*s, radius=70*s;
   const left=Math.max(0,Math.floor(expectedX-radius)),right=Math.min(width-1,Math.floor(expectedX+radius));
   const top=Math.max(0,Math.floor(expectedY-radius)),bottom=Math.min(height-1,Math.floor(expectedY+radius));
   const rw=right-left+1,rh=bottom-top+1;
@@ -130,8 +130,8 @@ function findMarker(pixels,width,height,center,minSize=10) {
   return best;
 }
 
-function bubbleMark(pixels,width,height,observed,point) {
-  const [cx,cy]=markerMap(point,observed),r=1.1*FORM.scale,ix=Math.floor(cx),iy=Math.floor(cy);
+function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale) {
+  const [cx,cy]=markerMap(point,observed,scale),r=1.1*scale,ix=Math.floor(cx),iy=Math.floor(cy);
   let dark=0,visible=0,count=0;
   for(let y=Math.floor(cy-r);y<=Math.ceil(cy+r);y++)for(let x=Math.floor(cx-r);x<=Math.ceil(cx+r);x++){
     if((x-ix)**2+(y-iy)**2>r*r||x<0||y<0||x>=width||y>=height)continue;
@@ -143,8 +143,8 @@ function bubbleMark(pixels,width,height,observed,point) {
   return 'blank';
 }
 
-function selectOne(pixels,width,height,observed,points,label,warnings,blank=true) {
-  const marks=points.map(p=>bubbleMark(pixels,width,height,observed,p));
+function selectOne(pixels,width,height,observed,points,label,warnings,blank=true,scale=FORM.scale) {
+  const marks=points.map(p=>bubbleMark(pixels,width,height,observed,p,scale));
   const selected=marks.flatMap((m,i)=>m==='filled'?[i]:[]);
   if(selected.length===1&&!marks.includes('uncertain'))return selected[0];
   if(selected.length>1||marks.includes('uncertain'))warnings.push(`${label}: tô mờ hoặc nhiều ô`);
@@ -152,34 +152,34 @@ function selectOne(pixels,width,height,observed,points,label,warnings,blank=true
   return null;
 }
 
-export function scanForm(pixels,width,height,pageCount=2) {
+export function scanForm(pixels,width,height,pageCount=2,scale=FORM.scale) {
   const answers=emptyAnswers(), warnings=answers.reviewItems;
   let seatNumber='',examCode='';
   if(pageCount!==2)warnings.push(`Cần quét đủ 2 trang; hiện có ${pageCount}`);
   if(Math.abs(width/height-FORM.pageWidth/FORM.pageHeight)>=0.15){warnings.push('Tỷ lệ ảnh khác mẫu QM 2025');return {seatNumber,examCode,answers};}
-  const observed=FORM.markers.map(p=>findMarker(pixels,width,height,p));
-  if(observed.some(x=>!x)||!FORM.orientation.some(p=>findMarker(pixels,width,height,p,5))||observed[1][0]<=observed[0][0]||observed[2][1]<=observed[0][1]){
+  const observed=FORM.markers.map(p=>findMarker(pixels,width,height,p,10,scale));
+  if(observed.some(x=>!x)||!FORM.orientation.some(p=>findMarker(pixels,width,height,p,5,scale))||observed[1][0]<=observed[0][0]||observed[2][1]<=observed[0][1]){
     warnings.push('Không nhận diện được phiếu hoặc mốc căn chỉnh');return {seatNumber,examCode,answers};
   }
   const digits=(columns,label)=>columns.map((x,col)=>{
-    const selected=selectOne(pixels,width,height,observed,FORM.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings);
+    const selected=selectOne(pixels,width,height,observed,FORM.identityRows.map(y=>[x,y]),`${label} cột ${col+1}`,warnings,true,scale);
     return selected==null?'?':String(selected);
   }).join('');
   seatNumber=digits(FORM.seatColumns,'SBD');examCode=digits(FORM.codeColumns,'Mã đề');
   for(let block=0;block<4;block++)for(let row=0;row<10;row++){
     const index=block*10+row,xs=FORM.mcColumns[block],y=FORM.mcRows[row];
-    const selected=selectOne(pixels,width,height,observed,xs.map(x=>[x,y]),`I-${index+1}`,warnings);
+    const selected=selectOne(pixels,width,height,observed,xs.map(x=>[x,y]),`I-${index+1}`,warnings,true,scale);
     if(selected!=null)answers.multipleChoice[index]='ABCD'[selected];
   }
   for(let q=0;q<8;q++)for(let j=0;j<4;j++){
-    const selected=selectOne(pixels,width,height,observed,FORM.tfColumns[q].map(x=>[x,FORM.tfRows[j]]),`II-${q+1}${'abcd'[j]}`,warnings);
+    const selected=selectOne(pixels,width,height,observed,FORM.tfColumns[q].map(x=>[x,FORM.tfRows[j]]),`II-${q+1}${'abcd'[j]}`,warnings,true,scale);
     if(selected!=null)answers.trueFalse[q*4+j]=selected===0;
   }
   for(let q=0;q<6;q++){
-    const cols=FORM.numericColumns[q],sign=bubbleMark(pixels,width,height,observed,[cols[0],FORM.signRow]);
-    const decimals=[cols[1],cols[2]].map(x=>bubbleMark(pixels,width,height,observed,[x,FORM.decimalRow]));
-    const selected=cols.map((x,place)=>selectOne(pixels,width,height,observed,FORM.digitRows.map(y=>[x,y]),`III-${q+1}-${place+1}`,warnings,false));
-    const states=cols.map(x=>FORM.digitRows.map(y=>bubbleMark(pixels,width,height,observed,[x,y])));
+    const cols=FORM.numericColumns[q],sign=bubbleMark(pixels,width,height,observed,[cols[0],FORM.signRow],scale);
+    const decimals=[cols[1],cols[2]].map(x=>bubbleMark(pixels,width,height,observed,[x,FORM.decimalRow],scale));
+    const selected=cols.map((x,place)=>selectOne(pixels,width,height,observed,FORM.digitRows.map(y=>[x,y]),`III-${q+1}-${place+1}`,warnings,false,scale));
+    const states=cols.map(x=>FORM.digitRows.map(y=>bubbleMark(pixels,width,height,observed,[x,y],scale)));
     let invalid=states.some(m=>m.filter(x=>x==='filled').length>1||m.includes('uncertain'))||sign==='uncertain'||decimals.includes('uncertain');
     const decimalPosition=decimals.flatMap((m,i)=>m==='filled'?[i+1]:[]);
     if(decimalPosition.length>1)invalid=true;
@@ -193,6 +193,13 @@ export function scanForm(pixels,width,height,pageCount=2) {
   }
   return {seatNumber,examCode,answers};
 }
+
+export function hasFormMarkers(pixels,width,height,scale=FORM.scale) {
+  if(!width||!height||pixels.length<width*height||Math.abs(width/height-FORM.pageWidth/FORM.pageHeight)>=0.15)return false;
+  const observed=FORM.markers.map(p=>findMarker(pixels,width,height,p,10,scale));
+  return !observed.some(x=>!x)&&FORM.orientation.some(p=>findMarker(pixels,width,height,p,5,scale))&&observed[1][0]>observed[0][0]&&observed[2][1]>observed[0][1];
+}
+export const scanSignature=({seatNumber,examCode,answers})=>JSON.stringify([seatNumber,examCode,answers.multipleChoice,answers.trueFalse,answers.numeric]);
 
 export function csvEscape(value) {
   let text=String(value??'');
