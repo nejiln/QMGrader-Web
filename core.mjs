@@ -149,7 +149,7 @@ function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=
     const gray=pixels[y*width+x];count++;centerTotal+=gray;if(gray<150)dark++;if(gray<235)visible++;
   }
   if(!count)return 'uncertain';
-  if(dark/count>=0.24)return 'filled';
+  if(dark/count>=0.16)return 'filled';
   if(profile===FORM)return visible/count>=0.08?'uncertain':'blank';
   let backgroundTotal=0,backgroundCount=0;
   for(let y=Math.floor(cy-r*2.8);y<=Math.ceil(cy+r*2.8);y++)for(let x=Math.floor(cx-r*2.8);x<=Math.ceil(cx+r*2.8);x++){
