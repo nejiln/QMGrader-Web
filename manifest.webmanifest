@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "QM Chấm phiếu",
-  "short_name": "QM Chấm",
-  "description": "Chấm phiếu trắc nghiệm QM 2025, lưu dữ liệu trên thiết bị.",
+  "name": "TN2026 · Chấm phiếu",
+  "short_name": "TN2026",
+  "description": "TN2026 · Chấm phiếu trắc nghiệm, lưu dữ liệu trên thiết bị.",
   "lang": "vi",
   "start_url": "./",
   "scope": "./",

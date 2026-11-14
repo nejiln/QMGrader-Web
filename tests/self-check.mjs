@@ -50,7 +50,7 @@ assert.equal(gradeSubmission(key,answers,policy).trueFalseEarned,28);
 const examForRegrade=(code,letter)=>({id:code,code,answerKey:{multipleChoice:Array(40).fill(letter),trueFalse:Array(32).fill(false),numeric:Array(6).fill('0')},questionCounts:{multipleChoice:40,trueFalse:8,numeric:6},policy});
 const regraded=regradeSubmission({examId:'9001',className:'12A1',recognizedSeatNumber:'11111111',recognizedExamCode:'9001',answers:emptyAnswers()},[examForRegrade('9001','A'),examForRegrade('9002','B')],[{className:'12A1',seatNumber:'22222222',fullName:'An'}],'22222222','9002',{...answers,reviewItems:[]});
 assert.equal(regraded.examId,'9002');assert.equal(regraded.score.multipleChoiceEarned,1);assert.equal(regraded.studentName,'An');assert.ok(regraded.answers.reviewItems.includes('Mã đề đã sửa sau khi nhận dạng'));
-assert.throws(()=>regradeSubmission({},[examForRegrade('9001','A')],[],'22222222','9999',emptyAnswers()),/Không tìm thấy đề mã 9999/);
+assert.throws(()=>regradeSubmission({},[examForRegrade('9001','A')],[],'22222222','9999',emptyAnswers()),/Không tìm thấy đáp án mã 9999/);
 
 const rows=parseCSV('\uFEFFSBD;Họ tên;Lớp\r\n00000123;"Nguyễn, An";12A1\r\n00000124;"Bình ""B""";12A1');
 assert.deepEqual(rows[1],['00000123','Nguyễn, An','12A1']);
@@ -60,8 +60,15 @@ assert.throws(()=>rosterRows(parseCSV('\uFEFFSBD;Lớp\r\n123;12A1')),/SBD và h
 assert.equal(rosterRows([['SBD','HỌ VÀ TÊN','','Lớp học'],['26270021','NGUYỄN MINH','ANH','10A1']])[0].fullName,'NGUYỄN MINH ANH');
 assert.equal(rosterRows([['SBD','HỌ VÀ TÊN','','Lớp học'],['26270021','NGUYỄN MINH','ANH','10A1']])[0].className,'10A1');
 const templateZip=unzipSync(rosterTemplateXlsx()),templateSheet=strFromU8(templateZip['xl/worksheets/sheet1.xml']);
-assert.match(templateSheet,/<t>SBD<\/t>/);assert.match(templateSheet,/<t>Họ tên<\/t>/);assert.match(templateSheet,/<t>Lớp<\/t>/);
+assert.match(templateSheet,/<t>STT<\/t>/);assert.match(templateSheet,/<t>SBD<\/t>/);assert.match(templateSheet,/<t>Họ tên<\/t>/);assert.match(templateSheet,/<t>Lớp<\/t>/);
+assert.equal(rosterRows([['STT','SBD','Họ tên','Lớp'],['5','00000049','Nguyễn A','10A1']])[0].order,5);
 assert.match(scoreCSV([{seatNumber:'=2+2',studentName:'An',className:'12A1',examCode:'2025',score:gradeSubmission(key,{...answers},policy),needsReview:true}]),/"'=2\+2"/);
+const csvConnected=scoreCSV([{batchId:'b1',seatNumber:'00000049',studentName:'',className:'',examCode:'0101',score:gradeSubmission(key,{...answers},policy),confirmed:true},{batchId:'b1',seatNumber:'00000050',studentName:'',className:'',examCode:'0101',score:gradeSubmission(key,{...answers},policy),needsReview:true}],[{className:'10A1',seatNumber:'00000049',fullName:'Trần Bình'}],[{id:'b1',className:'10a1'}]);
+assert.match(csvConnected,/"=""00000049""",Trần Bình|"=""00000049""","Trần Bình","10a1","=""0101"""/);
+assert.match(csvConnected,/"=""00000050""","","10a1","=""0101"""/);
+const ciRegrade=regradeSubmission({id:'s1',batchId:'b1',className:'10a1',seatNumber:'00000049',examCode:'1101',recognizedSeatNumber:'00000049',recognizedExamCode:'1101',answers:emptyAnswers()},[{id:'e1',code:'1101',answerKey:key,policy}],[{className:'10A1',seatNumber:'00000049',fullName:'Trần Bình'}],'00000049','1101',emptyAnswers());
+assert.equal(ciRegrade.studentName,'Trần Bình');
+assert.ok(!ciRegrade.answers.reviewItems.some(m=>m.includes('danh sách lớp')));
 
 const width=595*FORM.scale,height=842*FORM.scale,gray=new Uint8Array(width*height).fill(255),skew=p=>{const perspective=1+0.00001*p[0]+0.00001*p[1];return [1+FORM.scale*(p[0]+0.02*p[1])/perspective,2+FORM.scale*(p[1]+0.01*p[0])/perspective];};
 function fillSquare(point,side,color=0,target=gray){const [cx,cy]=skew(point),r=side*FORM.scale/2;for(let y=Math.floor(cy-r);y<=cy+r;y++)for(let x=Math.floor(cx-r);x<=cx+r;x++)if(x>=0&&y>=0&&x<width&&y<height)target[y*width+x]=color;}

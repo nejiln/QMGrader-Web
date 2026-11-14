@@ -1,6 +1,8 @@
-import { FORM, PHOTO_FORM, mapProfilePoint, canonicalDecimal, gradeSubmission, regradeSubmission, emptyAnswers, scoreCSV, scanForm, hasFormMarkers, scanSignature } from './core.mjs';
+import { FORM, PHOTO_FORM, mapProfilePoint, canonicalDecimal, gradeSubmission, regradeSubmission, emptyAnswers, scoreCSV, scanForm, hasFormMarkers, scanSignature, normalizeClass } from './core.mjs';
 import { extractAnswerKeyVariants, importRosterFile, readDocument } from './imports.mjs';
 
+const MAX_BATCH_SUBMISSIONS = 600;
+const rasterCanvases = new Map();
 const root = document.querySelector('#app'), toastBox = document.querySelector('#toast');
 let db, toastTimer, objectURLs = [], cameraStream, cameraTimer, cameraBusy = false, cameraSession = 0;
 
@@ -179,7 +181,7 @@ function resetViewer() { state.viewer = { zoom: 1, rotate: 0, panX: 0, panY: 0, 
 function navItems(className) {
   const activeView = ['batch', 'batch-detail', 'submission'].includes(state.view) ? 'batches' : state.view;
   const itemClass = className === 'segmented-tabs' ? 'segmented-tab' : 'tab';
-  return `<nav class="${className}" aria-label="Điều hướng chính">${[['batches', 'scan', 'Chấm bài'], ['exams', 'exam', 'Đề thi'], ['roster', 'people', 'Danh sách']].map(([view, symbol, label]) => `<button class="${itemClass}" data-action="navigate" data-view="${view}" aria-current="${activeView === view ? 'page' : 'false'}">${icon(symbol)}<span>${label}</span></button>`).join('')}</nav>`;
+  return `<nav class="${className}" aria-label="Điều hướng chính">${[['batches', 'scan', 'Chấm bài'], ['exams', 'exam', 'Đáp án'], ['roster', 'people', 'Danh sách']].map(([view, symbol, label]) => `<button class="${itemClass}" data-action="navigate" data-view="${view}" aria-current="${activeView === view ? 'page' : 'false'}">${icon(symbol)}<span>${label}</span></button>`).join('')}</nav>`;
 }
 
 async function render() {
@@ -197,8 +199,8 @@ async function render() {
   root.innerHTML = `
     <header class="topbar">
       <a class="brand" href="#" data-action="home">
-        <span class="brand-mark">QM</span>
-        <span class="brand-copy"><strong>QM Chấm</strong><small>Phiếu THPT 2025</small></span>
+        <span class="brand-mark">TN</span>
+        <span class="brand-copy"><strong>TN2026</strong><small>Phiếu trắc nghiệm</small></span>
       </a>
       ${navItems('segmented-tabs')}
       <div class="topbar-tools">
@@ -239,12 +241,11 @@ async function page(data, photos = {}) {
 
 function batchListPage({ batches, exams, submissions }) {
   const recent = sortNewest(batches.slice()).slice(0, 4);
-  const open = batch => `<button class="card batch-card" data-action="open-batch" data-id="${esc(batch.id)}"><span class="card-icon">${icon('people')}</span><span class="card-copy"><strong>${esc(batch.className)}</strong><p>${esc(exams.find(e => e.id === batch.examId)?.name || 'Đề đã xóa')} · ${new Date(batch.createdAt).toLocaleDateString('vi-VN')}</p></span><span class="card-end"><strong>${submissions.filter(s => s.batchId === batch.id).length} / 100</strong>bài đã chấm</span></button>`;
+  const open = batch => `<button class="card batch-card" data-action="open-batch" data-id="${esc(batch.id)}"><span class="card-icon">${icon('people')}</span><span class="card-copy"><strong>${esc(batch.className)}</strong><p>${esc(exams.find(e => e.id === batch.examId)?.name || batch.examName || 'Chọn mã đề khi chấm')} · ${new Date(batch.createdAt).toLocaleDateString('vi-VN')}</p></span><span class="card-end"><strong>${submissions.filter(s => s.batchId === batch.id).length} / ${MAX_BATCH_SUBMISSIONS}</strong>bài đã chấm</span></button>`;
   return `
     <section class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">Chấm trắc nghiệm · THPT 2025</p>
-        <h1>Từ phiếu giấy đến bảng điểm.</h1>
+        <p class="eyebrow">TN2026 · Chấm trắc nghiệm</p>
         <p class="lede">Quét phiếu 3 phần (A–D, Đúng/Sai, Trả lời ngắn), rà soát ô cảnh báo và xuất bảng điểm Excel. Toàn bộ dữ liệu lưu cục bộ trên thiết bị.</p>
         <div class="actions">
           ${exams.length ? `<button class="button" data-action="scan-entry">${icon('scan')}Quét phiếu</button><button class="button secondary" data-action="new-batch">${icon('plus')}Tạo đợt chấm</button>` : `<button class="button" data-action="navigate" data-view="exams">${icon('exam')}Thêm đáp án để chấm</button>`}
@@ -263,7 +264,7 @@ function batchListPage({ batches, exams, submissions }) {
       </div>
     </section>
     <section class="stats">
-      <article class="stat"><span>Đề thi</span><strong>${exams.length}</strong><span>Đáp án lưu cục bộ</span></article>
+      <article class="stat"><span>Đáp án</span><strong>${exams.length}</strong><span>Lưu cục bộ trên thiết bị</span></article>
       <article class="stat"><span>Đợt chấm</span><strong>${batches.length}</strong><span>Theo từng lớp học</span></article>
       <article class="stat"><span>Bài cần rà soát</span><strong>${submissions.filter(s => s.needsReview).length}</strong><span>Ô mờ, trống hoặc lệch mã</span></article>
     </section>
@@ -271,8 +272,8 @@ function batchListPage({ batches, exams, submissions }) {
       <div><p class="eyebrow">Tiếp tục công việc</p><h2>Đợt chấm gần đây</h2></div>
       ${recent.length ? `<button class="button quiet" data-action="navigate" data-view="batch">Xem tất cả ${icon('arrow')}</button>` : ''}
     </div>
-    ${recent.length ? `<div class="stack">${recent.map(open).join('')}</div>` : `<div class="empty"><p>${exams.length ? 'Tạo đợt chấm đầu tiên rồi quét phiếu học sinh.' : 'Bắt đầu bằng đề thi và thang điểm. Đáp án có thể nhập tay hoặc đọc từ tệp.'}</p><button class="button" data-action="${exams.length ? 'scan-entry' : 'navigate'}" ${exams.length ? '' : 'data-view="exams"'}>${icon(exams.length ? 'scan' : 'exam')}${exams.length ? 'Bắt đầu quét phiếu' : 'Tạo đề thi'}</button></div>`}
-    <p class="helper" style="margin-top:20px">Hỗ trợ mẫu phiếu QM 2025. Kiểm tra các ô gắn cờ cảnh báo trước khi chốt điểm.</p>
+    ${recent.length ? `<div class="stack">${recent.map(open).join('')}</div>` : `<div class="empty"><p>${exams.length ? 'Tạo đợt chấm đầu tiên rồi quét phiếu học sinh.' : 'Bắt đầu bằng đáp án và thang điểm. Đáp án có thể nhập tay hoặc đọc từ tệp.'}</p><button class="button" data-action="${exams.length ? 'scan-entry' : 'navigate'}" ${exams.length ? '' : 'data-view="exams"'}>${icon(exams.length ? 'scan' : 'exam')}${exams.length ? 'Bắt đầu quét phiếu' : 'Tạo đáp án'}</button></div>`}
+    <p class="helper" style="margin-top:20px">TN2026 · Kiểm tra các ô gắn cờ cảnh báo trước khi chốt điểm.</p>
   `;
 }
 
@@ -289,16 +290,16 @@ function examsPage({ exams }) {
   return `
     <p class="eyebrow">Thiết lập đáp án và thang điểm</p>
     <div class="toolbar">
-      <div><h1>Đề thi</h1><p class="lede">Tạo khóa đáp án một lần. Đợt chấm đối chiếu tự động theo mã đề.</p></div>
+      <div><h1>Đáp án</h1><p class="lede">Tạo khóa đáp án một lần. Đợt chấm đối chiếu tự động theo mã đề.</p></div>
       <div class="actions" style="margin:0">
         ${exams.length ? `<button class="button secondary sm" data-action="toggle-select-mode" data-scope="exams">${selecting ? 'Xong' : 'Chọn'}</button>` : ''}
         ${exams.length ? `<button class="button secondary" data-action="scan-entry">${icon('scan')}Quét phiếu</button>` : ''}
-        <button class="button" data-action="edit-exam">${icon('plus')}Tạo đề</button>
+        <button class="button" data-action="edit-exam">${icon('plus')}Tạo đáp án</button>
       </div>
     </div>
-    ${exams.length ? `<div class="list-controls"><input type="search" class="search-input" data-search="exams" value="${esc(state.search.exams)}" placeholder="Tìm theo tên đề hoặc mã đề..."></div>` : ''}
+    ${exams.length ? `<div class="list-controls"><input type="search" class="search-input" data-search="exams" value="${esc(state.search.exams)}" placeholder="Tìm theo tên hoặc mã đề..."></div>` : ''}
     ${bulkBarMarkup('exams', filtered.map(e => e.id), `<button type="button" class="button danger sm" data-action="bulk-delete-exams" ${sel.size ? '' : 'disabled'}>Xóa đã chọn (${sel.size})</button>`)}
-    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>${q ? 'Không tìm thấy đề thi phù hợp.' : 'Chưa có đề thi. Tạo đáp án và áp dụng thang điểm chuẩn THPT 2025 để bắt đầu.'}</p>${q ? '' : `<button class="button" data-action="edit-exam">${icon('plus')}Tạo đề đầu tiên</button>`}</div>`}
+    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>${q ? 'Không tìm thấy đáp án phù hợp.' : 'Chưa có đáp án. Tạo đáp án và áp dụng thang điểm chuẩn THPT 2025 để bắt đầu.'}</p>${q ? '' : `<button class="button" data-action="edit-exam">${icon('plus')}Tạo đáp án đầu tiên</button>`}</div>`}
   `;
 }
 
@@ -322,10 +323,10 @@ function rosterPage({ roster }) {
   const selecting = state.selectMode.roster, sel = state.selected.roster;
   const classes = [...new Set(filtered.map(row => row.className).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
   const groups = classes.map(name => {
-    const rows = filtered.filter(row => row.className === name);
-    return `<details class="card answer-card" open><summary><span>${esc(name)} <span class="pill neutral">${rows.length} học sinh</span></span><span class="class-head-actions"><button type="button" class="button danger sm" data-action="delete-roster-class" data-class="${esc(name)}">Xóa lớp</button></span></summary><div class="stack" style="margin-top:12px">${rows.map(row => {
+    const rows = filtered.filter(row => row.className === name).sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
+    return `<details class="card answer-card" open><summary><span>${esc(name)} <span class="pill neutral">${rows.length} học sinh</span></span><span class="class-head-actions"><button type="button" class="button danger sm" data-action="delete-roster-class" data-class="${esc(name)}">Xóa lớp</button></span></summary><div class="stack" style="margin-top:12px">${rows.map((row, idx) => {
       const checked = sel.has(row.id);
-      return `<div class="submission-row ${checked ? 'row-selected' : ''}" ${selecting ? `data-action="toggle-select-item" data-scope="roster" data-id="${esc(row.id)}"` : ''}>${selecting ? `<input type="checkbox" class="row-check" tabindex="-1" ${checked ? 'checked' : ''} aria-label="Chọn ${esc(row.fullName)}">` : `<span class="avatar-number">${esc(row.seatNumber.slice(-3))}</span>`}<span class="card-copy"><strong>${esc(row.fullName)}</strong><p>SBD ${esc(row.seatNumber)}</p></span>${selecting ? '' : `<div class="row-actions"><button type="button" class="button quiet sm" data-action="edit-roster-item" data-id="${esc(row.id)}">Sửa</button><button type="button" class="button danger sm" data-action="delete-roster" data-id="${esc(row.id)}" aria-label="Xóa ${esc(row.fullName)}">Xóa</button></div>`}</div>`;
+      return `<div class="submission-row ${checked ? 'row-selected' : ''}" ${selecting ? `data-action="toggle-select-item" data-scope="roster" data-id="${esc(row.id)}"` : ''}>${selecting ? `<input type="checkbox" class="row-check" tabindex="-1" ${checked ? 'checked' : ''} aria-label="Chọn ${esc(row.fullName)}">` : `<span class="avatar-number">${esc(String(row.order ?? idx + 1))}</span>`}<span class="card-copy"><strong>${esc(row.fullName)}</strong><p>SBD ${esc(row.seatNumber)}</p></span>${selecting ? '' : `<div class="row-actions"><button type="button" class="button quiet sm" data-action="edit-roster-item" data-id="${esc(row.id)}">Sửa</button><button type="button" class="button danger sm" data-action="delete-roster" data-id="${esc(row.id)}" aria-label="Xóa ${esc(row.fullName)}">Xóa</button></div>`}</div>`;
     }).join('')}</div></details>`;
   }).join('');
 
@@ -369,23 +370,23 @@ function batchPage({ batches }) {
   return `
     <p class="eyebrow">Lớp học và kết quả</p>
     <div class="toolbar">
-      <div><h1>Đợt chấm</h1><p class="lede">Mỗi đợt tối đa 100 bài, gắn với một lớp và một đề thi.</p></div>
+      <div><h1>Đợt chấm</h1><p class="lede">Mỗi đợt tối đa ${MAX_BATCH_SUBMISSIONS} bài, gắn với một lớp.</p></div>
       <div class="actions" style="margin:0">
         ${batches.length ? `<button class="button secondary sm" data-action="toggle-select-mode" data-scope="batches">${selecting ? 'Xong' : 'Chọn'}</button>` : ''}
         <button class="button" data-action="new-batch">${icon('plus')}Tạo đợt</button>
       </div>
     </div>
-    ${batches.length ? `<div class="list-controls"><input type="search" class="search-input" data-search="batches" value="${esc(state.search.batches)}" placeholder="Tìm đợt chấm theo tên lớp hoặc đề..."></div>` : ''}
+    ${batches.length ? `<div class="list-controls"><input type="search" class="search-input" data-search="batches" value="${esc(state.search.batches)}" placeholder="Tìm đợt chấm theo tên lớp hoặc đáp án..."></div>` : ''}
     ${bulkBarMarkup('batches', filtered.map(b => b.id), `<button type="button" class="button secondary sm" data-action="bulk-export-batches" ${sel.size ? '' : 'disabled'}>Xuất CSV gộp</button><button type="button" class="button danger sm" data-action="bulk-delete-batches" ${sel.size ? '' : 'disabled'}>Xóa đợt (${sel.size})</button>`)}
-    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>${q ? 'Không tìm thấy đợt chấm phù hợp.' : 'Tạo đề thi trước, sau đó mở đợt chấm theo lớp.'}</p>${q ? '' : `<button class="button" data-action="new-batch">${icon('plus')}Tạo đợt chấm</button>`}</div>`}
+    ${rows ? `<div class="stack">${rows}</div>` : `<div class="empty"><p>${q ? 'Không tìm thấy đợt chấm phù hợp.' : 'Tạo đáp án trước, sau đó mở đợt chấm theo lớp.'}</p>${q ? '' : `<button class="button" data-action="new-batch">${icon('plus')}Tạo đợt chấm</button>`}</div>`}
   `;
 }
 
 function batchDetailPage({ batches, exams, submissions, roster }) {
   const batch = batches.find(item => item.id === state.batchId);
   if (!batch) { state.view = 'batches'; return batchListPage({ batches, exams, submissions }); }
-  const exam = exams.find(item => item.id === batch.examId), papers = sortNewest(submissions.filter(item => item.batchId === batch.id).slice());
-  const rosterClass = roster.filter(item => item.className === batch.className);
+  const exam = batch.examId ? exams.find(item => item.id === batch.examId) : null, papers = sortNewest(submissions.filter(item => item.batchId === batch.id).slice());
+  const rosterClass = roster.filter(item => normalizeClass(item.className) === normalizeClass(batch.className));
   const q = state.search.submissions.trim().toLowerCase();
   const filtered = papers.filter(s => {
     if (state.submissionFilter === 'review' && !s.needsReview) return false;
@@ -403,18 +404,18 @@ function batchDetailPage({ batches, exams, submissions, roster }) {
 
   return `
     <div class="breadcrumb"><button data-action="navigate" data-view="batches">Đợt chấm</button><span>/</span><span>${esc(batch.className)}</span></div>
-    <p class="eyebrow">${esc(exam?.name || 'Đề đã xóa')} · Mã ${esc(exam?.code || '')}</p>
+    <p class="eyebrow">${esc(exam ? `${exam.name} · Mã ${exam.code}` : 'Chọn mã đề theo từng bài')}</p>
     <div class="toolbar">
-      <div><h1>Lớp ${esc(batch.className)}</h1><p class="lede">${papers.length} / 100 bài đã lưu${rosterClass.length ? ` · ${rosterClass.length} học sinh trong danh sách` : ''}</p></div>
+      <div><h1>Lớp ${esc(batch.className)}</h1><p class="lede">${papers.length} / ${MAX_BATCH_SUBMISSIONS} bài đã lưu${rosterClass.length ? ` · ${rosterClass.length} học sinh trong danh sách` : ''}</p></div>
       <div class="actions" style="margin:0">
         <button class="button secondary sm" data-action="edit-batch" data-id="${esc(batch.id)}">Sửa đợt</button>
         <button class="button danger sm" data-action="delete-batch" data-id="${esc(batch.id)}">Xóa đợt</button>
         ${papers.length ? `<button class="button secondary sm" data-action="toggle-select-mode" data-scope="submissions">${selecting ? 'Xong' : 'Chọn'}</button>` : ''}
         <button class="button secondary" data-action="export-csv" data-id="${esc(batch.id)}" ${papers.length ? '' : 'disabled'}>${icon('download')}Xuất CSV</button>
-        <button class="button" data-action="new-submission" data-id="${esc(batch.id)}" ${papers.length >= 100 ? 'disabled' : ''}>${icon('scan')}Quét phiếu</button>
+        <button class="button" data-action="new-submission" data-id="${esc(batch.id)}" ${papers.length >= MAX_BATCH_SUBMISSIONS ? 'disabled' : ''}>${icon('scan')}Quét phiếu</button>
       </div>
     </div>
-    ${!examComplete(exam) ? `<div class="notice warning"><span aria-hidden="true">!</span><div><strong>Đáp án chưa đủ theo số câu trong đề</strong><p>Kiểm tra khóa đáp án trước khi dùng để chấm.</p><button class="button quiet sm" style="margin-top:8px" data-action="edit-exam" data-id="${esc(exam?.id)}">Mở đáp án</button></div></div>` : ''}
+    ${exam && !examComplete(exam) ? `<div class="notice warning"><span aria-hidden="true">!</span><div><strong>Đáp án chưa đủ theo số câu trong đề</strong><p>Kiểm tra khóa đáp án trước khi dùng để chấm.</p><button class="button quiet sm" style="margin-top:8px" data-action="edit-exam" data-id="${esc(exam.id)}">Mở đáp án</button></div></div>` : ''}
     ${papers.length ? `
       <div class="list-controls">
         <input type="search" class="search-input" data-search="submissions" value="${esc(state.search.submissions)}" placeholder="Tìm theo tên, SBD hoặc mã đề...">
@@ -544,8 +545,9 @@ function submissionPage({ submissions, batches, exams }, { first, second }) {
             </div>
             <div class="inline-meta-grid">
               <div class="inline-meta-field">
-                <label for="inline-exam">Đề thi</label>
+                <label for="inline-exam">Đáp án</label>
                 <select id="inline-exam" class="inline-meta-input" data-action="select-submission-exam">
+                  ${currentExam ? '' : '<option value="" selected>-- Chọn đáp án --</option>'}
                   ${exams.map(e => `<option value="${esc(e.id)}" ${e.code === item.examCode ? 'selected' : ''}>${esc(e.name)} (${esc(e.code)})</option>`).join('')}
                 </select>
               </div>
@@ -712,7 +714,7 @@ function syncPickerButtons(container) {
 function dialogShell(title, body, buttons, formId) {
   const submit = `<button class="button" type="submit" ${formId ? `form="${esc(formId)}"` : ''}>Lưu</button>`;
   const actions = buttons || `<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${submit}`;
-  return `<dialog id="dialog"><div class="dialog-head"><div><p class="eyebrow">QM Chấm · Lưu cục bộ</p><h2>${esc(title)}</h2></div><button class="icon-button" type="button" data-action="close-dialog" aria-label="Đóng">×</button></div><div class="dialog-body">${body}<div id="dialog-feedback" class="notice warning" role="alert" hidden></div></div><div class="dialog-foot">${actions}</div></dialog>`;
+  return `<dialog id="dialog"><div class="dialog-head"><div><p class="eyebrow">TN2026 · Lưu cục bộ</p><h2>${esc(title)}</h2></div><button class="icon-button" type="button" data-action="close-dialog" aria-label="Đóng">×</button></div><div class="dialog-body">${body}<div id="dialog-feedback" class="notice warning" role="alert" hidden></div></div><div class="dialog-foot">${actions}</div></dialog>`;
 }
 
 function showDialog(title, body, formId, buttons) {
@@ -765,8 +767,8 @@ function disableCaptureFields(disabled) {
 
 async function newBatchDialog(scanAfterCreate = false, batch = null) {
   const { exams } = await localState();
-  if (!exams.length) { state.view = 'exams'; await render(); notify('Tạo đề thi trước khi mở đợt chấm.'); return; }
-  const body = `<form id="batch-form" data-id="${esc(batch?.id || '')}" data-scan-after-create="${scanAfterCreate}"><div class="form-grid"><label class="field"><span>Tên lớp</span><input name="className" maxlength="48" required value="${esc(batch?.className || '')}" placeholder="Ví dụ: 12A1"></label><label class="field"><span>Đề thi</span><select name="examId" required>${exams.map(e => `<option value="${esc(e.id)}" ${batch?.examId === e.id ? 'selected' : ''}>${esc(e.name)} · Mã ${esc(e.code)}</option>`).join('')}</select></label></div><p class="helper" style="margin-top:10px">Mỗi lớp nhận tối đa 100 bài trong đợt này.</p></form>`;
+  if (!exams.length) { state.view = 'exams'; await render(); notify('Tạo đáp án trước khi mở đợt chấm.'); return; }
+  const body = `<form id="batch-form" data-id="${esc(batch?.id || '')}" data-scan-after-create="${scanAfterCreate}"><div class="form-grid"><label class="field"><span>Tên lớp</span><input name="className" maxlength="48" required value="${esc(batch?.className || '')}" placeholder="Ví dụ: 12A1"></label><label class="field"><span>Đáp án mặc định (tùy chọn)</span><select name="examId"><option value="">-- Chọn mã đề khi chấm --</option>${exams.map(e => `<option value="${esc(e.id)}" ${batch?.examId === e.id ? 'selected' : ''}>${esc(e.name)} · Mã ${esc(e.code)}</option>`).join('')}</select></label></div><p class="helper" style="margin-top:10px">Mỗi lớp nhận tối đa ${MAX_BATCH_SUBMISSIONS} bài trong đợt này.</p></form>`;
   showDialog(batch ? 'Sửa đợt chấm' : 'Đợt chấm mới', body, 'batch-form');
 }
 
@@ -830,20 +832,28 @@ function examDialog(exam) {
     </form>
   `;
   const buttons = exam
-    ? `<button class="button danger" type="button" data-action="delete-exam" data-id="${esc(exam.id)}">Xóa đề</button><button class="button secondary" type="button" data-action="duplicate-exam" data-id="${esc(exam.id)}">Nhân bản</button><button class="button secondary" type="button" data-action="close-dialog">Hủy</button><button class="button" type="submit" form="exam-form">Lưu</button>`
+    ? `<button class="button danger" type="button" data-action="delete-exam" data-id="${esc(exam.id)}">Xóa đáp án</button><button class="button secondary" type="button" data-action="duplicate-exam" data-id="${esc(exam.id)}">Nhân bản</button><button class="button secondary" type="button" data-action="close-dialog">Hủy</button><button class="button" type="submit" form="exam-form">Lưu</button>`
     : undefined;
-  showDialog(exam ? 'Sửa đề thi' : 'Tạo đề thi', body, 'exam-form', buttons);
+  showDialog(exam ? 'Sửa đáp án' : 'Tạo đáp án', body, 'exam-form', buttons);
 }
 
 function captureDialog(batch, data) {
-  const exam = data.exams.find(e => e.id === batch.examId);
-  const draft = { batchId: batch.id, examId: batch.examId, className: batch.className, seatNumber: '', examCode: exam?.code || '', expectedExamCode: exam?.code || '', questionCounts: exam?.questionCounts || { multipleChoice: 40, trueFalse: 8, numeric: 6 }, firstPage: null, secondPage: null, scanResult: null, examKey: exam?.answerKey || {}, policy: exam ? policyFor(exam) : {}, photoNames: {}, studentName: '', confirmed: false };
+  const exam = batch.examId ? data.exams.find(e => e.id === batch.examId) : null;
+  const draft = { batchId: batch.id, examId: exam?.id || '', className: batch.className, seatNumber: '', examCode: exam?.code || '', expectedExamCode: exam?.code || '', questionCounts: exam?.questionCounts || { multipleChoice: 40, trueFalse: 8, numeric: 6 }, firstPage: null, secondPage: null, scanResult: null, examKey: exam?.answerKey || {}, policy: exam ? policyFor(exam) : {}, photoNames: {}, studentName: '', confirmed: false };
   state.captureDraft = draft;
   captureDialogContent(draft, data);
 }
 
 function syncCaptureExam(draft, exams, targetExam) {
-  if (!targetExam) return;
+  if (!targetExam) {
+    draft.examId = '';
+    draft.expectedExamCode = '';
+    draft.questionCounts = { multipleChoice: 40, trueFalse: 8, numeric: 6 };
+    draft.examKey = {};
+    draft.policy = {};
+    draft.score = null;
+    return;
+  }
   draft.examId = targetExam.id;
   draft.expectedExamCode = targetExam.code;
   draft.questionCounts = targetExam.questionCounts || { multipleChoice: 40, trueFalse: 8, numeric: 6 };
@@ -856,19 +866,22 @@ function syncCaptureExam(draft, exams, targetExam) {
 }
 
 function captureDialogContent(draft, data) {
-  const exam = data.exams.find(e => e.id === draft.examId), matches = data.roster.filter(x => x.className === draft.className && x.seatNumber === draft.seatNumber);
+  const exam = draft.examId ? data.exams.find(e => e.id === draft.examId) : null, targetClass = normalizeClass(draft.className), matches = data.roster.filter(x => normalizeClass(x.className) === targetClass && x.seatNumber === draft.seatNumber);
   const warning = matches.length > 1 ? `<div class="notice warning"><span>!</span><div><strong>SBD trùng trong ${esc(draft.className)}</strong><p>Sửa danh sách lớp trước khi ghép tên. Bài vẫn lưu để rà soát.</p></div></div>` : draft.seatNumber && matches.length === 0 ? `<div class="notice warning"><span>!</span><div><strong>Chưa có SBD này trong lớp</strong><p>Tên sẽ để trống. Có thể ghép sau trong danh sách lớp.</p></div></div>` : draft.examCode && draft.expectedExamCode && draft.examCode !== draft.expectedExamCode ? `<div class="notice warning"><span>!</span><div><strong>Mã đọc được ${esc(draft.examCode)} khác mã đề đã chọn ${esc(draft.expectedExamCode)}</strong><p>Đối chiếu mã đề trước khi lưu điểm.</p></div></div>` : '';
   const result = captureResultMarkup(draft);
   const scanner = `<div class="camera-actions"><button class="button secondary" type="button" data-action="start-camera" ${cameraStream ? 'hidden' : ''}>Quét tự động bằng camera</button><button class="button" type="button" data-action="snap-camera" ${cameraStream ? '' : 'hidden'}>Chụp & quét ngay</button><button class="button quiet" type="button" data-action="stop-camera" ${cameraStream ? '' : 'hidden'}>Dừng camera</button></div><div id="live-camera" class="live-camera" ${cameraStream ? '' : 'hidden'}><video id="scan-camera" autoplay muted playsinline aria-label="Khung quét phiếu"></video><span class="camera-frame" aria-hidden="true"></span></div><p id="camera-status" class="helper" role="status" ${cameraStream || draft.cameraStatus ? '' : 'hidden'}>${esc(draft.cameraStatus || 'Đưa đủ bốn mốc đen trang 1 vào khung, giữ yên để app tự quét.')}</p>`;
   const uploadStatus = draft.uploadStatus ? `<div class="notice ${draft.uploadError ? 'error' : ''}" role="status"><span>${draft.uploadError ? '!' : 'i'}</span><div>${esc(draft.uploadStatus)}</div></div>` : '';
-  const body = `<form id="capture-form"><input type="hidden" name="batchId" value="${esc(draft.batchId)}"><div class="form-grid"><label class="field full"><span>Đề thi</span><select name="captureExamId" data-action="select-capture-exam">${data.exams.map(e => `<option value="${esc(e.id)}" ${e.id === draft.examId ? 'selected' : ''}>${esc(e.name)} · Mã ${esc(e.code)}</option>`).join('')}</select></label><label class="field"><span>Số báo danh · 8 số</span><input name="seatNumber" inputmode="numeric" maxlength="8" value="${esc(draft.seatNumber)}" placeholder="Đọc tự động từ phiếu"></label><label class="field"><span>Mã đề · 4 số</span><input name="examCode" inputmode="numeric" maxlength="4" value="${esc(draft.examCode)}"></label></div>${scanner}${warning}<div id="capture-result">${result}</div>${uploadStatus}<div class="capture-pair">${captureSlot(1, draft.scanPage || draft.firstPage)}</div><label class="field"><span>Nhập phiếu PDF thay vì chụp</span><input type="file" data-pdf accept="application/pdf,.pdf"><small>Đọc trang đầu trên thiết bị. PDF scan cần đúng mẫu và ảnh rõ mốc căn chỉnh.</small></label><details class="card answer-card" ${draft.scanResult ? '' : 'open'}><summary>${draft.scanResult ? 'Sửa đáp án trước khi lưu' : 'Nhập đáp án thủ công'}</summary><div class="stack" style="margin-top:12px">${answerEditor(draft.scanResult?.answers || emptyAnswers(), draft.questionCounts, draft.scanResult?.answers?.reviewItems || [], exam?.answerKey)}</div></details><p class="helper" style="margin-top:10px">${esc(exam?.name || '')} · Mã ${esc(exam?.code || '')} · ảnh phiếu lưu cục bộ trên thiết bị.</p></form>`;
-  const canSave = draft.scanResult && (!draft.cameraUsed || draft.cameraStable || draft.cameraAccepted), buttons = `<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${!draft.scanResult ? '<button class="button quiet" type="button" data-action="manual-entry">Nhập tay</button>' : ''}<button class="button secondary" type="submit" form="capture-form" value="save-and-next" ${canSave ? '' : 'disabled'}>Lưu & Quét tiếp</button><button class="button" type="submit" form="capture-form" value="save" ${canSave ? '' : 'disabled'}>Lưu bài chấm</button>`;
+  const body = `<form id="capture-form"><input type="hidden" name="batchId" value="${esc(draft.batchId)}"><div class="form-grid"><label class="field full"><span>Đáp án</span><select name="captureExamId" data-action="select-capture-exam"><option value="">-- Chọn mã đề để chấm --</option>${data.exams.map(e => `<option value="${esc(e.id)}" ${e.id === draft.examId ? 'selected' : ''}>${esc(e.name)} · Mã ${esc(e.code)}</option>`).join('')}</select></label><label class="field"><span>Số báo danh · 8 số</span><input name="seatNumber" inputmode="numeric" maxlength="8" value="${esc(draft.seatNumber)}" placeholder="Đọc tự động từ phiếu"></label><label class="field"><span>Mã đề · 4 số</span><input name="examCode" inputmode="numeric" maxlength="4" value="${esc(draft.examCode)}"></label></div>${scanner}${warning}<div id="capture-result">${result}</div>${uploadStatus}<div class="capture-pair">${captureSlot(1, draft.scanPage || draft.firstPage)}</div><label class="field"><span>Nhập phiếu PDF thay vì chụp</span><input type="file" data-pdf accept="application/pdf,.pdf"><small>Đọc trang đầu trên thiết bị. PDF scan cần đúng mẫu và ảnh rõ mốc căn chỉnh.</small></label><details class="card answer-card" ${draft.scanResult ? '' : 'open'}><summary>${draft.scanResult ? 'Sửa đáp án trước khi lưu' : 'Nhập đáp án thủ công'}</summary><div class="stack" style="margin-top:12px">${answerEditor(draft.scanResult?.answers || emptyAnswers(), draft.questionCounts, draft.scanResult?.answers?.reviewItems || [], exam?.answerKey)}</div></details><p class="helper" style="margin-top:10px">${exam ? `${esc(exam.name)} · Mã ${esc(exam.code)}` : 'Chưa chọn đáp án'} · ảnh phiếu lưu cục bộ trên thiết bị.</p></form>`;
+  const canSave = draft.scanResult && exam && (!draft.cameraUsed || draft.cameraStable || draft.cameraAccepted), buttons = `<button class="button secondary" type="button" data-action="close-dialog">Hủy</button>${!draft.scanResult ? '<button class="button quiet" type="button" data-action="manual-entry">Nhập tay</button>' : ''}<button class="button secondary" type="submit" form="capture-form" value="save-and-next" ${canSave ? '' : 'disabled'}>Lưu & Quét tiếp</button><button class="button" type="submit" form="capture-form" value="save" ${canSave ? '' : 'disabled'}>Lưu bài chấm</button>`;
   if (state.modal) { state.modal.body = body; state.modal.buttons = buttons; updateDialog(body); const foot = root.querySelector('.dialog-foot'); if (foot) foot.innerHTML = buttons; }
   else showDialog('Quét phiếu', body, 'capture-form', buttons);
 }
 
 function captureResultMarkup(draft) {
   if (!draft.scanResult) return '';
+  if (!draft.examId || !draft.score) {
+    return `<div class="notice warning"><span>!</span><div><strong>Chưa có đáp án khớp mã đề (${esc(draft.examCode || 'chưa đọc được')})</strong><p>Chọn đáp án từ danh sách phía trên để chấm điểm trước khi lưu.</p></div></div>`;
+  }
   const score = draft.score || {}, review = [...(draft.scanResult.answers.reviewItems || [])], ready = draft.cameraStable || draft.cameraAccepted || !draft.cameraUsed;
   if (draft.cameraAccepted && !draft.cameraStable) review.push('Chỉ nhận dạng được một khung hình; kiểm tra kỹ');
   return `<div class="score-strip">${[['Phần I', score.multipleChoiceEarned, score.multipleChoicePossible, false], ['Phần II', score.trueFalseEarned, score.trueFalsePossible, false], ['Phần III', score.numericEarned, score.numericPossible, false], ['Tổng', score.totalEarned, score.totalPossible, true]].map(([name, earned, total, isTotal]) => `<div class="score-chip ${isTotal ? 'total' : ''}"><span>${name}</span><strong>${fmt(earned)} <small>/ ${fmt(total)}</small></strong></div>`).join('')}</div><div class="notice ${review.length || !ready ? 'warning' : ''}"><span>${review.length || !ready ? '!' : '✓'}</span><div><strong>${!ready ? 'Điểm tạm tính · đang xác nhận' : review.length ? `${review.length} mục cần nhìn lại` : 'Phiếu đã nhận dạng'}</strong><p>${ready ? 'Kiểm tra ô được đánh dấu trước khi lưu. Bạn có thể sửa đáp án.' : 'Giữ phiếu yên để app xác nhận rồi chốt điểm.'}</p>${review.length ? `<ul class="warning-list">${review.slice(0, 8).map(x => `<li>${esc(x)}</li>`).join('')}${review.length > 8 ? `<li>… còn ${review.length - 8} mục</li>` : ''}</ul>` : ''}</div></div>`;
@@ -891,11 +904,17 @@ async function imageSource(file) {
 }
 
 async function rasterize(bitmap, rotation, scale = FORM.scale) {
-  const width = FORM.pageWidth * scale, height = FORM.pageHeight * scale, canvas = document.createElement('canvas'), landscape = rotation % 2 === 1;
-  canvas.width = width; canvas.height = height;
-  const context = canvas.getContext('2d', { willReadFrequently: true }); context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height);
+  const width = FORM.pageWidth * scale, height = FORM.pageHeight * scale, landscape = rotation % 2 === 1;
+  let canvas = rasterCanvases.get(scale);
+  if (!canvas) { canvas = document.createElement('canvas'); rasterCanvases.set(scale, canvas); }
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  context.save();
+  context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
   const drawWidth = landscape ? height : width, drawHeight = landscape ? width : height;
   context.translate(width / 2, height / 2); context.rotate(rotation * Math.PI / 2); context.drawImage(bitmap, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+  context.restore();
   const rgba = context.getImageData(0, 0, width, height).data, gray = new Uint8Array(width * height);
   for (let i = 0, j = 0; i < gray.length; i++, j += 4)gray[i] = Math.round(.299 * rgba[j] + .587 * rgba[j + 1] + .114 * rgba[j + 2]);
   return { gray, width, height };
@@ -959,10 +978,11 @@ async function scanCameraFrame(video, stable = { signature: '', count: 0, consec
       stable.signature = signature;
       stable.seatNumber = scan.seatNumber;
       stable.examCode = scan.examCode;
-      const locked = stable.count >= 2 || stable.consecutive >= 3;
+      const cleanIdentity = /^\d{8}$/.test(scan.seatNumber) && /^\d{4}$/.test(scan.examCode);
+      const locked = cleanIdentity || stable.count >= 2 || stable.consecutive >= 3;
       const draft = state.captureDraft; if (!draft) return;
       const data = await localState();
-      const matchedExam = data.exams.find(x => x.code === scan.examCode) || data.exams.find(x => x.id === draft.examId);
+      const matchedExam = data.exams.find(x => x.code === scan.examCode) || null;
       draft.scanResult = scan;
       draft.seatNumber = scan.seatNumber;
       draft.examCode = scan.examCode;
@@ -974,15 +994,15 @@ async function scanCameraFrame(video, stable = { signature: '', count: 0, consec
       if (form) {
         form.elements.seatNumber.value = scan.seatNumber;
         form.elements.examCode.value = scan.examCode;
-        if (matchedExam && form.elements.captureExamId) form.elements.captureExamId.value = matchedExam.id;
+        if (form.elements.captureExamId) form.elements.captureExamId.value = matchedExam ? matchedExam.id : '';
         for (let i = 0; i < 40; i++) if (form.elements[`mc-${i}`]) form.elements[`mc-${i}`].value = scan.answers.multipleChoice[i] || '';
         for (let i = 0; i < 32; i++) if (form.elements[`tf-${i}`]) form.elements[`tf-${i}`].value = scan.answers.trueFalse[i] == null ? '' : String(scan.answers.trueFalse[i]);
         for (let i = 0; i < 6; i++) if (form.elements[`num-${i}`]) form.elements[`num-${i}`].value = scan.answers.numeric[i] || '';
         syncPickerButtons(form);
       }
       const result = root.querySelector('#capture-result'); if (result) result.innerHTML = captureResultMarkup(draft);
-      root.querySelectorAll('button[type="submit"][form="capture-form"]').forEach(btn => btn.disabled = !locked);
-      setCameraStatus(locked ? (mismatchCode && !matchedExam ? 'Đã đọc phiếu. Mã đề khác đề đã chọn; kiểm tra trước khi lưu.' : 'Đã nhận phiếu ổn định. Kiểm tra các ô cảnh báo trước khi lưu.') : 'Đã thấy phiếu! Giữ yên 1 nhịp để khóa kết quả…');
+      root.querySelectorAll('button[type="submit"][form="capture-form"]').forEach(btn => btn.disabled = !locked || !matchedExam);
+      setCameraStatus(locked ? (!matchedExam ? 'Đã đọc phiếu. Chưa khớp mã đề — chọn đáp án từ danh sách để chấm.' : 'Đã nhận phiếu ổn định. Kiểm tra các ô cảnh báo trước khi lưu.') : 'Đã thấy phiếu! Giữ yên 1 nhịp để khóa kết quả…');
       if (locked) {
         const photo = await canvasToBlob(canvas);
         if (session !== cameraSession) return;
@@ -1010,7 +1030,7 @@ async function startCamera() {
   const start = root.querySelector('[data-action="start-camera"]'); if (start) start.disabled = true;
   const session = ++cameraSession; let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 2560 } }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1700 } }, audio: false });
     if (session !== cameraSession) { stream.getTracks().forEach(track => track.stop()); return; }
     cameraStream = stream;
     const draft = state.captureDraft; if (!draft) { stopCamera(); return; }
@@ -1081,6 +1101,27 @@ function applyViewerTransform() {
   if (label) label.textContent = `${Math.round(state.viewer.zoom * 100)}%`;
 }
 
+async function syncRosterToSubmissions(classNames) {
+  const targets = new Set([...classNames].map(normalizeClass));
+  if (!targets.size) return;
+  const [roster, submissions] = await Promise.all([all('roster'), all('submissions')]);
+  const updated = [];
+  for (const sub of submissions) {
+    const cls = normalizeClass(sub.className);
+    if (!targets.has(cls)) continue;
+    const matches = roster.filter(r => normalizeClass(r.className) === cls && r.seatNumber === sub.seatNumber);
+    const nextName = matches.length === 1 ? matches[0].fullName : '';
+    const items = (sub.answers?.reviewItems || []).filter(m => !(m.startsWith('SBD ') && m.includes('danh sách lớp')));
+    if (matches.length > 1) items.push(`SBD ${sub.seatNumber}: trùng trong danh sách lớp`);
+    else if (!matches.length) items.push(`SBD ${sub.seatNumber}: không khớp danh sách lớp`);
+    const nextNeedsReview = !sub.reviewed && !sub.confirmed && items.length > 0;
+    if (nextName !== sub.studentName || nextNeedsReview !== sub.needsReview || JSON.stringify(items) !== JSON.stringify(sub.answers?.reviewItems || [])) {
+      updated.push({ ...sub, studentName: nextName, needsReview: nextNeedsReview, answers: { ...sub.answers, reviewItems: items } });
+    }
+  }
+  if (updated.length) await saveMany('submissions', updated);
+}
+
 async function handleSubmit(event) {
   const form = event.target; if (!(form instanceof HTMLFormElement)) return;
   if (!['batch-form', 'exam-form', 'capture-form', 'review-form', 'roster-form', 'roster-item-form'].includes(form.id)) return;
@@ -1088,14 +1129,16 @@ async function handleSubmit(event) {
   try {
     const f = new FormData(form);
     if (form.id === 'batch-form') {
-      const className = String(f.get('className')).trim(), examId = String(f.get('examId'));
-      if (!className || !examId) throw new Error('Nhập lớp và chọn đề thi.');
-      const exam = (await all('exams')).find(x => x.id === examId); if (!exam) throw new Error('Đề thi không còn tồn tại.');
+      const className = String(f.get('className')).trim(), examId = String(f.get('examId') || '');
+      if (!className) throw new Error('Nhập tên lớp.');
+      const exam = examId ? (await all('exams')).find(x => x.id === examId) : null;
+      if (examId && !exam) throw new Error('Đáp án không còn tồn tại.');
+      const examName = exam ? exam.name : 'Chọn mã đề khi chấm';
       const existingId = form.dataset.id;
       if (existingId) {
         const existing = (await all('batches')).find(x => x.id === existingId);
         if (!existing) throw new Error('Đợt chấm không còn tồn tại.');
-        const updatedBatch = { ...existing, className, examId, examName: exam.name };
+        const updatedBatch = { ...existing, className, examId, examName };
         await save('batches', updatedBatch);
         if (existing.className !== className) {
           const subs = (await all('submissions')).filter(s => s.batchId === existingId).map(s => ({ ...s, className }));
@@ -1103,7 +1146,7 @@ async function handleSubmit(event) {
         }
         closeDialog(); await render(); notify('Đã cập nhật đợt chấm.');
       } else {
-        const batch = { id: crypto.randomUUID(), className, examId, examName: exam.name, createdAt: Date.now() };
+        const batch = { id: crypto.randomUUID(), className, examId, examName, createdAt: Date.now() };
         await save('batches', batch); closeDialog(); state.batchId = batch.id; state.view = 'batch-detail'; await render();
         if (form.dataset.scanAfterCreate === 'true') captureDialog(batch, await localState()); else notify('Đã tạo đợt chấm.');
       }
@@ -1137,9 +1180,10 @@ async function handleSubmit(event) {
     if (form.id === 'capture-form') {
       const draft = state.captureDraft; if ((!draft?.firstPage && !draft?.manual) || !draft.scanResult) throw new Error('Chụp trang trước của phiếu rồi kiểm tra nhận dạng.');
       if (draft.cameraUsed && !draft.cameraStable && !draft.cameraAccepted) throw new Error('Giữ phiếu yên để camera xác nhận, hoặc dừng quét để rà thủ công.');
-      const batch = (await all('batches')).find(x => x.id === draft.batchId), exam = (await all('exams')).find(x => x.id === draft.examId);
-      if (!batch || !exam) throw new Error('Không còn đợt chấm hoặc đề thi.');
-      const count = (await all('submissions')).filter(x => x.batchId === batch.id).length; if (count >= 100) throw new Error('Đợt chấm đã đủ 100 bài.');
+      const batch = (await all('batches')).find(x => x.id === draft.batchId), exam = draft.examId ? (await all('exams')).find(x => x.id === draft.examId) : null;
+      if (!batch) throw new Error('Không còn đợt chấm.');
+      if (!exam) throw new Error('Chưa có đáp án khớp mã đề. Chọn đáp án từ danh sách để chấm.');
+      const count = (await all('submissions')).filter(x => x.batchId === batch.id).length; if (count >= MAX_BATCH_SUBMISSIONS) throw new Error(`Đợt chấm đã đủ ${MAX_BATCH_SUBMISSIONS} bài.`);
       const answers = answersFromForm(form); answers.reviewItems = [...draft.scanResult.answers.reviewItems];
       const seat = String(f.get('seatNumber') || draft.scanResult.seatNumber).trim(), code = String(f.get('examCode') || draft.scanResult.examCode).trim();
       if (!/^\d{8}$/.test(seat) || !/^\d{4}$/.test(code)) throw new Error('SBD phải đủ 8 số, mã đề phải đủ 4 số. Sửa ô được đánh dấu trước khi lưu.');
@@ -1148,7 +1192,8 @@ async function handleSubmit(event) {
       if (seat !== draft.scanResult.seatNumber) answers.reviewItems.push('SBD đã sửa sau khi nhận dạng');
       if (code !== draft.scanResult.examCode) answers.reviewItems.push('Mã đề đã sửa sau khi nhận dạng');
       if (!draft.firstPage) answers.reviewItems.push('Thiếu trang trước · chưa có ảnh gốc');
-      const roster = (await all('roster')).filter(x => x.className === batch.className && x.seatNumber === seat);
+      const targetClass = normalizeClass(batch.className);
+      const roster = (await all('roster')).filter(x => normalizeClass(x.className) === targetClass && x.seatNumber === seat);
       if (roster.length > 1) answers.reviewItems.push(`SBD ${seat}: trùng trong danh sách lớp`);
       if (!roster.length) answers.reviewItems.push(`SBD ${seat}: không khớp danh sách lớp`);
       if (code !== exam.code) answers.reviewItems.push(`Mã đề ${code}: khác mã đề đã chọn (${exam.code})`);
@@ -1157,9 +1202,9 @@ async function handleSubmit(event) {
       await savePaper(submission, draft.firstPage, draft.secondPage);
       if (saveAndNext) {
         const data = await localState();
-        if (data.submissions.filter(x => x.batchId === batch.id).length >= 100) {
+        if (data.submissions.filter(x => x.batchId === batch.id).length >= MAX_BATCH_SUBMISSIONS) {
           closeDialog(); state.batchId = batch.id; state.view = 'submission'; state.submissionId = submission.id; resetViewer(); await render();
-          notify('Đã lưu bài cuối cùng (đợt chấm đã đủ 100 bài).');
+          notify(`Đã lưu bài cuối cùng (đợt chấm đã đủ ${MAX_BATCH_SUBMISSIONS} bài).`);
           return;
         }
         closeDialog();
@@ -1183,10 +1228,14 @@ async function handleSubmit(event) {
         const preview = state.reviewPreview?.id === id && state.reviewPreview.seatNumber === seat && state.reviewPreview.examCode === code && JSON.stringify(state.reviewPreview.answers.multipleChoice) === JSON.stringify(answers.multipleChoice) && JSON.stringify(state.reviewPreview.answers.trueFalse) === JSON.stringify(answers.trueFalse) && JSON.stringify(state.reviewPreview.answers.numeric) === JSON.stringify(answers.numeric) ? state.reviewPreview : null;
         const updated = preview ? { ...preview } : { ...submission };
         if (!preview) {
-          updated.seatNumber = seat; updated.examCode = code; updated.answers = answers;
+          updated.seatNumber = seat; updated.examCode = code;
+          answers.reviewItems = (answers.reviewItems || []).filter(m => !m.startsWith('SBD đã sửa') && !m.startsWith('Mã đề đã sửa') && !(m.startsWith('SBD ') && m.includes('danh sách lớp')));
           addBlankWarnings(answers, exams.find(x => x.code === code).answerKey);
-          const roster = (await all('roster')).filter(x => x.className === submission.className && x.seatNumber === seat);
+          const targetClass = normalizeClass(submission.className);
+          const roster = (await all('roster')).filter(x => normalizeClass(x.className) === targetClass && x.seatNumber === seat);
           updated.studentName = roster.length === 1 ? roster[0].fullName : '';
+          if (roster.length > 1) answers.reviewItems.push(`SBD ${seat}: trùng trong danh sách lớp`);
+          if (!roster.length) answers.reviewItems.push(`SBD ${seat}: không khớp danh sách lớp`);
           answers.reviewItems.push(seat !== submission.recognizedSeatNumber ? 'SBD đã sửa sau khi nhận dạng' : '', code !== submission.recognizedExamCode ? 'Mã đề đã sửa sau khi nhận dạng' : '');
           answers.reviewItems = answers.reviewItems.filter(Boolean);
           updated.answers = answers; updated.needsReview = answers.reviewItems.length > 0;
@@ -1266,18 +1315,22 @@ async function handleSubmit(event) {
     }
     if (form.id === 'roster-form') {
       const rows = state.importDraft?.rows; if (!rows?.length) throw new Error('Tệp chưa có học sinh hợp lệ.');
-      const old = await all('roster'), seen = new Set(old.map(x => `${x.className}\u0000${x.seatNumber}`)), fresh = []; let duplicates = 0;
-      for (const item of rows) { const key = `${item.className}\u0000${item.seatNumber}`; if (seen.has(key)) { duplicates++; continue; } seen.add(key); fresh.push(item); }
-      for (const item of fresh) await save('roster', item); closeDialog(); state.importDraft = null; state.view = 'roster'; await render(); notify(`Đã thêm ${fresh.length} học sinh${duplicates ? `; bỏ qua ${duplicates} SBD trùng` : ''}.`);
+      const old = await all('roster'), seen = new Set(old.map(x => `${normalizeClass(x.className)}\u0000${x.seatNumber}`)), fresh = []; let duplicates = 0;
+      for (const item of rows) { const key = `${normalizeClass(item.className)}\u0000${item.seatNumber}`; if (seen.has(key)) { duplicates++; continue; } seen.add(key); fresh.push(item); }
+      for (const item of fresh) await save('roster', item);
+      await syncRosterToSubmissions(fresh.map(x => x.className));
+      closeDialog(); state.importDraft = null; state.view = 'roster'; await render(); notify(`Đã thêm ${fresh.length} học sinh${duplicates ? `; bỏ qua ${duplicates} SBD trùng` : ''}.`);
     }
     if (form.id === 'roster-item-form') {
       const fullName = String(f.get('fullName') || '').trim(), seatNumber = String(f.get('seatNumber') || '').trim(), className = String(f.get('className') || '').trim();
       if (!fullName || !className) throw new Error('Nhập đầy đủ họ tên và lớp.');
       if (!/^\d{8}$/.test(seatNumber)) throw new Error('SBD phải gồm đúng 8 chữ số.');
       const id = form.dataset.id || crypto.randomUUID();
-      const old = await all('roster');
-      if (old.some(x => x.id !== id && x.className === className && x.seatNumber === seatNumber)) throw new Error(`SBD ${seatNumber} đã tồn tại trong lớp ${className}.`);
-      await save('roster', { id, fullName, seatNumber, className });
+      const old = await all('roster'), existing = old.find(x => x.id === id);
+      if (old.some(x => x.id !== id && normalizeClass(x.className) === normalizeClass(className) && x.seatNumber === seatNumber)) throw new Error(`SBD ${seatNumber} đã tồn tại trong lớp ${className}.`);
+      const order = existing?.order ?? (old.filter(x => normalizeClass(x.className) === normalizeClass(className)).length + 1);
+      await save('roster', { id, order, fullName, seatNumber, className });
+      await syncRosterToSubmissions([className, existing?.className].filter(Boolean));
       closeDialog(); state.view = 'roster'; await render(); notify(form.dataset.id ? 'Đã cập nhật học sinh.' : 'Đã thêm học sinh.');
     }
   } catch (error) {
@@ -1298,15 +1351,15 @@ async function handleClick(event) {
     if (action === 'scan-entry') {
       const data = await localState();
       if (!data.batches.length) await newBatchDialog(true);
-      else if (data.batches.length === 1) { const batch = data.batches[0]; if (data.submissions.filter(x => x.batchId === batch.id).length >= 100) throw new Error('Đợt chấm đã đủ 100 bài.'); state.batchId = batch.id; captureDialog(batch, data); }
+      else if (data.batches.length === 1) { const batch = data.batches[0]; if (data.submissions.filter(x => x.batchId === batch.id).length >= MAX_BATCH_SUBMISSIONS) throw new Error(`Đợt chấm đã đủ ${MAX_BATCH_SUBMISSIONS} bài.`); state.batchId = batch.id; captureDialog(batch, data); }
       else { state.view = 'batch'; await render(); notify('Chọn lớp cần chấm, rồi chạm “Quét phiếu”.'); }
     }
-    if (action === 'edit-exam') { const id = target.dataset.id, exam = id ? (await all('exams')).find(x => x.id === id) : null; if (id && !exam) throw new Error('Không tìm thấy đề thi.'); examDialog(exam); }
+    if (action === 'edit-exam') { const id = target.dataset.id, exam = id ? (await all('exams')).find(x => x.id === id) : null; if (id && !exam) throw new Error('Không tìm thấy đáp án.'); examDialog(exam); }
     if (action === 'open-batch') { state.reviewPreview = null; state.batchId = target.dataset.id; state.view = 'batch-detail'; state.submissionId = null; await render(); }
     if (action === 'open-submission') { if (state.submissionId !== target.dataset.id) { state.reviewPreview = null; resetViewer(); } state.submissionId = target.dataset.id; state.view = 'submission'; await render(); }
     if (action === 'new-submission') {
       const data = await localState(), batch = data.batches.find(x => x.id === target.dataset.id); if (!batch) throw new Error('Không tìm thấy đợt chấm.');
-      const current = data.submissions.filter(x => x.batchId === batch.id).length; if (current >= 100) throw new Error('Đợt chấm đã đủ 100 bài.'); captureDialog(batch, data);
+      const current = data.submissions.filter(x => x.batchId === batch.id).length; if (current >= MAX_BATCH_SUBMISSIONS) throw new Error(`Đợt chấm đã đủ ${MAX_BATCH_SUBMISSIONS} bài.`); captureDialog(batch, data);
     }
     if (action === 'pick-choice') {
       const inputId = target.dataset.target, value = target.dataset.value;
@@ -1373,8 +1426,8 @@ async function handleClick(event) {
       draft.scanResult = await scanPhoto(photo, FORM.scale, draft.questionCounts);
       const data = await localState();
       draft.seatNumber = draft.scanResult.seatNumber || '';
-      draft.examCode = draft.scanResult.examCode || draft.examCode;
-      const exam = data.exams.find(x => x.code === draft.examCode) || data.exams.find(x => x.id === draft.examId);
+      draft.examCode = draft.scanResult.examCode || '';
+      const exam = data.exams.find(x => x.code === draft.examCode) || null;
       syncCaptureExam(draft, data.exams, exam);
       draft.cameraStatus = hasRecognizedMarks(draft.scanResult) ? 'Đã chụp & nhận dạng phiếu từ camera.' : 'Đã chụp ảnh nhưng chưa nhận dạng đủ mốc; kiểm tra hoặc sửa tay.';
       captureDialogContent(draft, data);
@@ -1395,8 +1448,8 @@ async function handleClick(event) {
       captureDialogContent(draft, data);
     }
     if (action === 'close-dialog') closeDialog();
-    if (action === 'download-roster-template') { download('\uFEFFSBD;Họ tên;Lớp\r\n', 'QM-mau-danh-sach-hoc-sinh.csv', 'text/csv;charset=utf-8'); notify('Đã tải file mẫu CSV.'); }
-    if (action === 'download-roster-xlsx') { const { rosterTemplateXlsx } = await import('./imports.mjs'); download(rosterTemplateXlsx(), 'QM-mau-danh-sach-hoc-sinh.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); notify('Đã tải file mẫu Excel.'); }
+    if (action === 'download-roster-template') { download('\uFEFFSTT;SBD;Họ tên;Lớp\r\n', 'TN2026-mau-danh-sach-hoc-sinh.csv', 'text/csv;charset=utf-8'); notify('Đã tải file mẫu CSV.'); }
+    if (action === 'download-roster-xlsx') { const { rosterTemplateXlsx } = await import('./imports.mjs'); download(rosterTemplateXlsx(), 'TN2026-mau-danh-sach-hoc-sinh.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); notify('Đã tải file mẫu Excel.'); }
     if (action === 'import-roster') { openRosterImportDialog(); }
     if (action === 'delete-roster') {
       const row = (await all('roster')).find(x => x.id === target.dataset.id); if (!row) return;
@@ -1409,8 +1462,8 @@ async function handleClick(event) {
       await deletePaper(item); state.view = 'batch-detail'; state.batchId = item.batchId; state.submissionId = null; await render(); notify('Đã xóa bài và ảnh.');
     }
     if (action === 'export-csv') {
-      const batch = (await all('batches')).find(x => x.id === target.dataset.id), rows = (await all('submissions')).filter(x => x.batchId === target.dataset.id); if (!batch || !rows.length) throw new Error('Chưa có bài để xuất.');
-      download(scoreCSV(rows), `QM-${batch.className.replace(/[^\p{L}\p{N}-]+/gu, '-')}-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8'); notify('Đã xuất CSV để mở bằng Excel.');
+      const data = await localState(), batch = data.batches.find(x => x.id === target.dataset.id), rows = data.submissions.filter(x => x.batchId === target.dataset.id); if (!batch || !rows.length) throw new Error('Chưa có bài để xuất.');
+      download(scoreCSV(rows, data.roster, data.batches), `TN2026-${batch.className.replace(/[^\p{L}\p{N}-]+/gu, '-')}-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8'); notify('Đã xuất CSV để mở bằng Excel.');
     }
     if (action === 'toggle-select-mode') {
       const scope = target.dataset.scope; if (!scope) return;
@@ -1485,9 +1538,9 @@ async function handleClick(event) {
       await render(); notify(`Đã xóa ${ids.length} đợt chấm.`); return;
     }
     if (action === 'bulk-export-batches') {
-      const ids = new Set(state.selected.batches), rows = (await all('submissions')).filter(x => ids.has(x.batchId));
+      const data = await localState(), ids = new Set(state.selected.batches), rows = data.submissions.filter(x => ids.has(x.batchId));
       if (!rows.length) throw new Error('Các đợt đã chọn chưa có bài nào để xuất.');
-      download(scoreCSV(rows), `QM-nhieu-dot-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
+      download(scoreCSV(rows, data.roster, data.batches), `TN2026-nhieu-dot-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
       notify(`Đã xuất ${rows.length} bài từ ${ids.size} đợt chấm.`); return;
     }
     if (action === 'bulk-regrade-submissions') {
@@ -1513,9 +1566,9 @@ async function handleClick(event) {
       await render(); notify(`Đã chốt điểm ${updated.length} bài.`); return;
     }
     if (action === 'bulk-export-submissions') {
-      const ids = new Set(state.selected.submissions), rows = (await all('submissions')).filter(x => ids.has(x.id));
+      const data = await localState(), ids = new Set(state.selected.submissions), rows = data.submissions.filter(x => ids.has(x.id));
       if (!rows.length) throw new Error('Chưa chọn bài nào để xuất.');
-      download(scoreCSV(rows), `QM-bai-cham-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
+      download(scoreCSV(rows, data.roster, data.batches), `TN2026-bai-cham-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
       notify(`Đã xuất ${rows.length} bài.`); return;
     }
     if (action === 'bulk-delete-submissions') {
@@ -1594,12 +1647,10 @@ function download(text, name, type) {
 async function handleChange(event) {
   const input = event.target;
   if (input.matches('[data-action="select-capture-exam"]') && state.captureDraft) {
-    const data = await localState(), exam = data.exams.find(x => x.id === input.value);
-    if (exam) {
-      state.captureDraft.examCode = exam.code;
-      syncCaptureExam(state.captureDraft, data.exams, exam);
-      captureDialogContent(state.captureDraft, data);
-    }
+    const data = await localState(), exam = input.value ? data.exams.find(x => x.id === input.value) : null;
+    state.captureDraft.examCode = exam ? exam.code : '';
+    syncCaptureExam(state.captureDraft, data.exams, exam);
+    captureDialogContent(state.captureDraft, data);
     return;
   }
   if (input.matches('[data-action="select-submission-exam"]')) {
@@ -1652,7 +1703,7 @@ async function handlePhoto(input) {
     if (draft.scanResult && !draft.manual) {
       const data = await localState();
       if (number === 1) { draft.seatNumber = draft.scanResult.seatNumber || draft.seatNumber; draft.examCode = draft.scanResult.examCode || draft.examCode; }
-      const exam = data.exams.find(x => x.code === draft.examCode) || data.exams.find(x => x.id === draft.examId);
+      const exam = data.exams.find(x => x.code === draft.examCode) || null;
       if (formAnswers) { draft.scanResult.answers.multipleChoice = formAnswers.multipleChoice; draft.scanResult.answers.trueFalse = formAnswers.trueFalse; draft.scanResult.answers.numeric = formAnswers.numeric; }
       syncCaptureExam(draft, data.exams, exam);
     }
@@ -1677,7 +1728,7 @@ async function handlePdf(input) {
     const data = await localState();
     if (draft.scanResult) {
       draft.seatNumber = draft.scanResult.seatNumber; draft.examCode = draft.scanResult.examCode;
-      const exam = data.exams.find(e => e.code === draft.examCode) || data.exams.find(e => e.id === draft.examId);
+      const exam = data.exams.find(e => e.code === draft.examCode) || null;
       syncCaptureExam(draft, data.exams, exam);
     }
     draft.uploadStatus = `Đã tải ${draft.uploadName}. ${hasRecognizedMarks(draft.scanResult) ? 'Kiểm tra đáp án và cảnh báo bên dưới.' : 'Không thấy đáp án theo mẫu. Thử ảnh rõ mặt trước phiếu hoặc nhập tay.'}`;

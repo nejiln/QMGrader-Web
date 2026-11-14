@@ -68,14 +68,17 @@ export function gradeSubmission(key, answers, policy) {
   return score;
 }
 
+export const normalizeClass = value => String(value ?? '').trim().toLowerCase();
+
 export function regradeSubmission(submission, exams, roster, seatNumber, examCode, answers) {
   if(!/^\d{8}$/.test(seatNumber)||!/^\d{4}$/.test(examCode))throw new Error('SBD phải đủ 8 số, mã đề phải đủ 4 số.');
   const exam=exams.find(item=>item.code===examCode);
-  if(!exam)throw new Error(`Không tìm thấy đề mã ${examCode}. Nạp đáp án mã này trước khi chấm lại.`);
+  if(!exam)throw new Error(`Không tìm thấy đáp án mã ${examCode}. Nạp đáp án mã này trước khi chấm lại.`);
   answers.reviewItems=(Array.isArray(answers.reviewItems)?answers.reviewItems:(submission.answers?.reviewItems||[])).filter(message=>!message.startsWith('SBD đã sửa')&&!message.startsWith('Mã đề đã sửa')&&!(message.startsWith('SBD ')&&message.includes('danh sách lớp'))&&!(message.startsWith('Mã đề ')&&message.includes('khác mã đề đã chọn')));
   if(seatNumber!==submission.recognizedSeatNumber)answers.reviewItems.push('SBD đã sửa sau khi nhận dạng');
   if(examCode!==submission.recognizedExamCode)answers.reviewItems.push('Mã đề đã sửa sau khi nhận dạng');
-  const matches=roster.filter(item=>item.className===submission.className&&item.seatNumber===seatNumber);
+  const targetClass=normalizeClass(submission.className);
+  const matches=roster.filter(item=>normalizeClass(item.className)===targetClass&&item.seatNumber===seatNumber);
   if(matches.length>1)answers.reviewItems.push(`SBD ${seatNumber}: trùng trong danh sách lớp`);
   if(!matches.length)answers.reviewItems.push(`SBD ${seatNumber}: không khớp danh sách lớp`);
   return {...submission,examId:exam.id,seatNumber,examCode,studentName:matches.length===1?matches[0].fullName:'',answers,score:gradeSubmission(exam.answerKey,answers,{...exam.policy,questionCounts:exam.questionCounts}),needsReview:answers.reviewItems.length>0,reviewed:false,confirmed:false};
@@ -106,15 +109,18 @@ export const normalizeHeader = value => String(value).normalize('NFD').replace(/
 
 export function rosterRows(rows, defaultClass = '') {
   const header = rows[0]?.map(normalizeHeader) || [];
+  const orderIndex = header.findIndex(x => ['stt','sothutu','tt'].includes(x));
   const seat = header.findIndex(x => ['sbd','sobodanh','masothisinh'].includes(x));
   const name = header.findIndex(x => ['hoten','hovaten','tenhocsinh','fullname','name'].includes(x));
   const classIndex = header.findIndex(x => ['lop','lophoc','class','classname'].includes(x));
   if (seat < 0 || name < 0) throw new Error('Không tìm thấy cột SBD và họ tên trong dòng tiêu đề.');
-  return rows.slice(1).flatMap(row => {
+  return rows.slice(1).flatMap((row, rowIndex) => {
     const id = String(row[seat] ?? '').trim(), fullName = [row[name],header[name]==='hovaten'&&!header[name+1]?row[name+1]:''].map(value=>String(value??'').trim()).filter(Boolean).join(' ');
     if (!id || !fullName) return [];
     const normalizedId = /^\d+$/.test(id) && id.length < 8 ? id.padStart(8, '0') : id;
-    return [{id: crypto.randomUUID(), seatNumber: normalizedId, fullName, className: String(row[classIndex] ?? '').trim() || defaultClass.trim()}];
+    const rawOrder = orderIndex >= 0 ? String(row[orderIndex] ?? '').trim() : '';
+    const order = /^\d+$/.test(rawOrder) ? Number(rawOrder) : rowIndex + 1;
+    return [{id: crypto.randomUUID(), order, seatNumber: normalizedId, fullName, className: String(row[classIndex] ?? '').trim() || defaultClass.trim()}];
   });
 }
 
@@ -144,13 +150,13 @@ export function mapProfilePoint(point, observed, profile=FORM) {
 }
 
 function findMarker(pixels,width,height,center,minSize=10,scale=FORM.scale) {
-  const s=scale, expectedX=center[0]*s, expectedY=center[1]*s, radius=70*s;
+  const s=scale, expectedX=center[0]*s, expectedY=center[1]*s, radius=105*s;
   const left=Math.max(0,Math.floor(expectedX-radius)),right=Math.min(width-1,Math.floor(expectedX+radius));
   const top=Math.max(0,Math.floor(expectedY-radius)),bottom=Math.min(height-1,Math.floor(expectedY+radius));
   const rw=right-left+1,rh=bottom-top+1;
   if (rw<=0||rh<=0) return null;
-  const min=Math.floor(minSize*s), max=20*s;
-  for (const darkThreshold of [75, 115]) {
+  const min=Math.floor(minSize*s), max=22*s;
+  for (const darkThreshold of [75, 115, 145]) {
     const seen=new Uint8Array(rw*rh);
     let best=null,bestDistance=Infinity;
     for (let start=0;start<seen.length;start++) {
@@ -279,9 +285,38 @@ export function csvEscape(value) {
   return `"${text.replace(/"/g,'""')}"`;
 }
 
-export function scoreCSV(submissions) {
+function csvTextCode(value) {
+  const text=String(value??'').trim();
+  if(/^[0-9?]+$/.test(text))return `"=""${text}"""`;
+  return csvEscape(text);
+}
+
+export function scoreCSV(submissions, roster=[], batches=[]) {
   const header=['SBD','Họ tên','Lớp','Mã đề','Phần I','Phần II','Phần III','Tổng điểm','Trạng thái'];
   const number=n=>Number(n||0).toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
-  const rows=submissions.map(s=>[s.seatNumber,s.studentName,s.className,s.examCode,number(s.score.multipleChoiceEarned),number(s.score.trueFalseEarned),number(s.score.numericEarned),number(s.score.totalEarned),s.needsReview?'Cần rà soát':s.confirmed?'Đã xác nhận':'Tạm tính']);
-  return '\uFEFF'+[header,...rows].map(row=>row.map(csvEscape).join(',')).join('\r\n')+'\r\n';
+  const batchMap=new Map(batches.map(b=>[b.id,b.className]));
+  const rosterMap=new Map();
+  for(const r of roster){
+    const key=`${normalizeClass(r.className)}\u0000${r.seatNumber}`;
+    if(!rosterMap.has(key))rosterMap.set(key,[]);
+    rosterMap.get(key).push(r);
+  }
+  const lines=submissions.map(s=>{
+    const className=batchMap.get(s.batchId)||s.className||'';
+    const matches=rosterMap.get(`${normalizeClass(className)}\u0000${s.seatNumber}`)||[];
+    const studentName=s.studentName||(matches.length===1?matches[0].fullName:'');
+    const score=s.score||{};
+    return [
+      csvTextCode(s.seatNumber),
+      csvEscape(studentName),
+      csvEscape(className),
+      csvTextCode(s.examCode),
+      csvEscape(number(score.multipleChoiceEarned)),
+      csvEscape(number(score.trueFalseEarned)),
+      csvEscape(number(score.numericEarned)),
+      csvEscape(number(score.totalEarned)),
+      csvEscape(s.needsReview?'Cần rà soát':s.confirmed?'Đã xác nhận':'Tạm tính')
+    ].join(',');
+  });
+  return '\uFEFF'+[header.map(csvEscape).join(','),...lines].join('\r\n')+'\r\n';
 }
