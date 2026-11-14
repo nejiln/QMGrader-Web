@@ -978,8 +978,7 @@ async function scanCameraFrame(video, stable = { signature: '', count: 0, consec
       stable.signature = signature;
       stable.seatNumber = scan.seatNumber;
       stable.examCode = scan.examCode;
-      const cleanIdentity = /^\d{8}$/.test(scan.seatNumber) && /^\d{4}$/.test(scan.examCode);
-      const locked = cleanIdentity || stable.count >= 2 || stable.consecutive >= 3;
+      const locked = stable.count >= 2 || stable.consecutive >= 3;
       const draft = state.captureDraft; if (!draft) return;
       const data = await localState();
       const matchedExam = data.exams.find(x => x.code === scan.examCode) || null;

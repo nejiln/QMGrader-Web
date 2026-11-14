@@ -181,7 +181,7 @@ function findMarker(pixels,width,height,center,minSize=10,scale=FORM.scale) {
   return null;
 }
 function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=FORM,inkThreshold=150,fillFraction=0.24) {
-  const [cx,cy]=markerMap(point,observed,scale,profile.markers),r=1.1*scale,ix=Math.floor(cx),iy=Math.floor(cy);
+  const [cx,cy]=markerMap(point,observed,scale,profile.markers),r=1.35*scale,ix=Math.floor(cx),iy=Math.floor(cy);
   let dark=0,visible=0,count=0,centerTotal=0;
   for(let y=Math.floor(cy-r);y<=Math.ceil(cy+r);y++)for(let x=Math.floor(cx-r);x<=Math.ceil(cx+r);x++){
     if((x-ix)**2+(y-iy)**2>r*r||x<0||y<0||x>=width||y>=height)continue;
@@ -191,11 +191,14 @@ function bubbleMark(pixels,width,height,observed,point,scale=FORM.scale,profile=
   if(dark/count>=fillFraction)return 'filled';
   if(profile===FORM)return visible/count>=0.08?'uncertain':'blank';
   let backgroundTotal=0,backgroundCount=0;
-  for(let y=Math.floor(cy-r*2.8);y<=Math.ceil(cy+r*2.8);y++)for(let x=Math.floor(cx-r*2.8);x<=Math.ceil(cx+r*2.8);x++){
-    const d=(x-ix)**2+(y-iy)**2;if(d<r*r*2.25||d>r*r*7.84||x<0||y<0||x>=width||y>=height)continue;
+  const bgMin=3.8*scale,bgMax=5.2*scale,bgMinSq=bgMin*bgMin,bgMaxSq=bgMax*bgMax;
+  for(let y=Math.floor(cy-bgMax);y<=Math.ceil(cy+bgMax);y++)for(let x=Math.floor(cx-bgMax);x<=Math.ceil(cx+bgMax);x++){
+    const d=(x-ix)**2+(y-iy)**2;if(d<bgMinSq||d>bgMaxSq||x<0||y<0||x>=width||y>=height)continue;
     backgroundTotal+=pixels[y*width+x];backgroundCount++;
   }
-  if(visible/count>=0.08&&backgroundCount&&backgroundTotal/backgroundCount-centerTotal/count>18)return 'uncertain';
+  const centerMean=centerTotal/count,backgroundMean=backgroundCount?backgroundTotal/backgroundCount:255,contrast=backgroundMean-centerMean;
+  if(contrast>=36&&centerMean<205)return 'filled';
+  if(visible/count>=0.08&&backgroundCount&&contrast>18)return 'uncertain';
   return 'blank';
 }
 
@@ -234,11 +237,11 @@ function scanProfile(pixels,width,height,scale,profile) {
   seatNumber=digits(profile.seatColumns,'SBD');examCode=digits(profile.codeColumns,'Mã đề');
   for(let block=0;block<4;block++)for(let row=0;row<10;row++){
     const index=block*10+row,xs=profile.mcColumns[block],y=profile.mcRows[row];
-    const selected=selectOne(pixels,width,height,observed,xs.map(x=>[x,y]),`I-${index+1}`,warnings,true,scale,profile);
+    const selected=selectOne(pixels,width,height,observed,xs.map(x=>[x,y]),`I-${index+1}`,warnings,true,scale,profile,150,0.24,profile===PHOTO_FORM);
     if(selected!=null)answers.multipleChoice[index]='ABCD'[selected];
   }
   for(let q=0;q<8;q++)for(let j=0;j<4;j++){
-    const selected=selectOne(pixels,width,height,observed,profile.tfColumns[q].map(x=>[x,profile.tfRows[j]]),`II-${q+1}${'abcd'[j]}`,warnings,true,scale,profile);
+    const selected=selectOne(pixels,width,height,observed,profile.tfColumns[q].map(x=>[x,profile.tfRows[j]]),`II-${q+1}${'abcd'[j]}`,warnings,true,scale,profile,150,0.24,profile===PHOTO_FORM);
     if(selected!=null)answers.trueFalse[q*4+j]=selected===0;
   }
   for(let q=0;q<6;q++){

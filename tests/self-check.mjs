@@ -138,6 +138,20 @@ for(const point of PHOTO_FORM.orientation)camSquare(point,8,98);
 assert.equal(hasFormMarkers(camGray,camW,camH,1),true);
 assert.equal(scanSignature(photoScan),scanSignature(photoScan));
 
+// Bright camera exposure pencil marks (gray=165 on paper=245) should still be detected via local contrast
+const brightGray=new Uint8Array(width*height).fill(245);
+function brightMark(point,radius,color=165){const cx=point[0]*FORM.scale,cy=point[1]*FORM.scale;for(let y=Math.floor(cy-radius);y<=cy+radius;y++)for(let x=Math.floor(cx-radius);x<=cx+radius;x++)if(x>=0&&y>=0&&x<width&&y<height&&(x-cx)**2+(y-cy)**2<=radius**2)brightGray[y*width+x]=color;}
+function brightSquare(point,side){const cx=point[0]*FORM.scale,cy=point[1]*FORM.scale,r=side*FORM.scale/2;for(let y=cy-r;y<=cy+r;y++)for(let x=cx-r;x<=cx+r;x++)if(x>=0&&y>=0&&x<width&&y<height)brightGray[Math.floor(y)*width+Math.floor(x)]=90;}
+for(const point of PHOTO_FORM.markers)brightSquare(point,12);
+for(const point of PHOTO_FORM.orientation)brightSquare(point,8);
+for(let c=0;c<8;c++)brightMark([PHOTO_FORM.seatColumns[c],PHOTO_FORM.identityRows[Number(seat[c])]],FORM.scale*3.5,165);
+for(let c=0;c<4;c++)brightMark([PHOTO_FORM.codeColumns[c],PHOTO_FORM.identityRows[Number(code[c])]],FORM.scale*3.5,165);
+for(let i=0;i<40;i++){const columns=PHOTO_FORM.mcColumns[Math.floor(i/10)],row=PHOTO_FORM.mcRows[i%10];brightMark([columns[i%4],row],FORM.scale*3.5,165);}
+const brightScan=scanForm(brightGray,width,height);
+assert.equal(brightScan.seatNumber,seat);
+assert.equal(brightScan.examCode,code);
+assert.ok(brightScan.answers.multipleChoice.every((value,index)=>value==='ABCD'[index%4]));
+
 const serviceWorkerEvents={},deletedCaches=[],cacheNames=['another-app','qm-cham-v1','qm-cham-qmgrader-web-v2','qm-cham-qmgrader-web-v3','qm-cham-qmgrader-web-v4','qm-cham-qmgrader-web-v5','qm-cham-qmgrader-web-v6','qm-cham-qmgrader-web-v7','qm-cham-qmgrader-web-v8','qm-cham-qmgrader-web-v9','qm-cham-qmgrader-web-v10','qm-cham-qmgrader-web-v11','qm-cham-qmgrader-web-v12','qm-cham-qmgrader-web-v13','qm-cham-qmgrader-web-v14','qm-cham-qmgrader-web-v15','qm-cham-qmgrader-web-v16','qm-cham-qmgrader-web-v17','qm-cham-qmgrader-web-v18','qm-cham-qmgrader-web-v19','qm-cham-qmgrader-web-v20','qm-cham-qmgrader-web-v21','qm-cham-qmgrader-web-v22'];
 vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(name,handler)=>serviceWorkerEvents[name]=handler,clients:{claim:async()=>{}}},caches:{keys:async()=>cacheNames,delete:async name=>deletedCaches.push(name)}});
 let activation;serviceWorkerEvents.activate({waitUntil:promise=>activation=promise});await activation;
